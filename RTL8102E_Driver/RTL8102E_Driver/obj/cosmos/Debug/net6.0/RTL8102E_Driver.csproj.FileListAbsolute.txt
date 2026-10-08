@@ -1,0 +1,13 @@
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.csproj.AssemblyReference.cache
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.AssemblyInfoInputs.cache
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.AssemblyInfo.cs
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.csproj.CoreCompileInputs.cache
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.sourcelink.json
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\bin\cosmos\Debug\net6.0\RTL8102E_Driver.deps.json
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\bin\cosmos\Debug\net6.0\RTL8102E_Driver.dll
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\bin\cosmos\Debug\net6.0\RTL8102E_Driver.pdb
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.dll
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\refint\RTL8102E_Driver.dll
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\RTL8102E_Driver.pdb
+C:\Users\admin\Documents\personal projects\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\RTL8102E_Driver\obj\cosmos\Debug\net6.0\ref\RTL8102E_Driver.dll
