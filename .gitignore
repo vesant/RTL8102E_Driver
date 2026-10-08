@@ -1,0 +1,5 @@
+# Ignore Visual Studio solution user/state files
+rtl8102e_driver.slnx
+
+# Visual Studio index file
+1afb363a-51ed-4da1-9568-0f8a61233f91.vsidx
