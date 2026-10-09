@@ -171,6 +171,13 @@ namespace RTL8102E_Driver
                 rxBuffers[i] = new ManagedMemoryBlock(1536, 8);
             }
 
+            // Allocate TX Buffers (4 buffers of 1536 bytes -> aligned to 8 bytes)
+            txBuffers = new ManagedMemoryBlock[4];
+            for (int i = 0; i < 4; i++)
+            {
+                txBuffers[i] = new ManagedMemoryBlock(1536, 8);
+            }
+
             Console.WriteLine("r8102e: setting up rx ring in ram...");
             for (int i = 0; i < 4; i++)
             {
@@ -192,9 +199,9 @@ namespace RTL8102E_Driver
             {
                 uint offset = (uint)(i * 16);
                 Write32(txDescBlock, offset, 0);
-                Write32(txDescBlock, offset + 4, 0);
-                Write32(txDescBlock, offset + 8, 0);
-                Write32(txDescBlock, offset + 12, 0);
+                Write32(txDescBlock, offset + 4, 0); // Vlan
+                Write32(txDescBlock, offset + 8, (uint)txBuffers[i].Offset); // Buffer Address Low
+                Write32(txDescBlock, offset + 12, (uint)(txBuffers[i].Offset >> 32)); // Buffer Address High
             }
 
             Console.WriteLine("r8102e: writing physical addresses to registers...");
@@ -256,8 +263,20 @@ namespace RTL8102E_Driver
                 txBuffers[currentTxDesc][(uint)i] = buffer[offset + i];
             }
 
+            // Ethernet requires a minimum payload of 60 bytes (excluding CRC).
+            // ARP replies are only 42 bytes. RTL8102E does NOT auto-pad runts!
+            uint txLength = (uint)length;
+            if (txLength < 60)
+            {
+                for (uint i = txLength; i < 60; i++)
+                {
+                    txBuffers[currentTxDesc][i] = 0; // Pad with zeros
+                }
+                txLength = 60;
+            }
+
             // CommandStatus: Length | OWN (bit 31) | FS (bit 29) | LS (bit 28)
-            uint newCmdStatus = (uint)length | 0x80000000 | 0x20000000 | 0x10000000;
+            uint newCmdStatus = txLength | 0x80000000 | 0x20000000 | 0x10000000;
             if (currentTxDesc == 3) newCmdStatus |= 0x40000000; // Preserve EOR bit
             
             Write32(txDescBlock, descOffset, newCmdStatus);
@@ -265,7 +284,7 @@ namespace RTL8102E_Driver
             // Trigger TX poll (TxPoll register 0x38 = 0x40)
             mmio.Bytes[0x38] = 0x40;
             
-            Console.WriteLine($"[TX] Sent {length} bytes to MAC (Desc {currentTxDesc})");
+            Console.WriteLine($"[TX] Sent {txLength} bytes to MAC (Desc {currentTxDesc}) - original {length}");
             
             currentTxDesc = (currentTxDesc + 1) % 4;
             return true;
