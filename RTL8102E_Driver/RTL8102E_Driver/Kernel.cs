@@ -37,8 +37,6 @@ namespace RTL8102E_Driver {
         protected override void Run() {
             if (driver != null)
             {
-                // We still need to poll manually because we disabled IRQs
-                driver.Poll();
                 Sys.Network.NetworkStack.Update();
             }
         }

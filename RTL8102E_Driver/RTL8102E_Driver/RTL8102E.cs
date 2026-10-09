@@ -232,17 +232,33 @@ namespace RTL8102E_Driver
 
         private bool Phase4And5()
         {
-            Console.WriteLine("r8102e: skipping hardware IRQ binding (switching to polling mode)...");
-
             Console.WriteLine("r8102e: enabling RX and TX in CR...");
             // Command Register (0x37): RE=0x08, TE=0x04 -> 0x0C
             mmio.Bytes[0x37] = 0x0C;
+            
+            // Force Clear PCI 'Interrupt Disable' bit (Bit 10) in PCI Command Register (Offset 0x04)
+            // Some BIOSes leave this bit set to 1, completely muting the PCI INTx# line!
+            uint pciCmd = pciDevice.ReadRegister32(0x04);
+            pciCmd &= ~(uint)(1 << 10);
+            pciDevice.WriteRegister32(0x04, pciCmd);
 
-            Console.WriteLine("r8102e: masking all hardware interrupts in IMR (we will poll instead)...");
-            // Interrupt Mask Register (0x3C): 0x0000 ensures no hardware INTA# is generated
-            mmio.Words[0x3C] = 0x0000;
+            byte irq = pciDevice.InterruptLine;
+            Console.WriteLine($"r8102e: binding hardware IRQ to INT {irq} (and common fallbacks)...");
+            
+            // Bind to the exact IRQ reported by PCI
+            Cosmos.Core.INTs.SetIrqHandler(irq, HandleInterrupt);
+            
+            // In many Bare-Metal scenarios, ACPI/PIC routing lies about the true IRQ.
+            // We bind to the holy trinity of PCI IRQs just in case to catch rogue signals.
+            if (irq != 9) Cosmos.Core.INTs.SetIrqHandler(9, HandleInterrupt);
+            if (irq != 10) Cosmos.Core.INTs.SetIrqHandler(10, HandleInterrupt);
+            if (irq != 11) Cosmos.Core.INTs.SetIrqHandler(11, HandleInterrupt);
 
-            Console.WriteLine("r8102e: driver fully initialized and listening!");
+            Console.WriteLine("r8102e: unmasking interrupts in IMR...");
+            // Interrupt Mask Register (0x3C): ROK=0x0001, RER=0x0002, TOK=0x0004, TER=0x0008, RxOverflow=0x0010
+            mmio.Words[0x3C] = 0x001F;
+
+            Console.WriteLine("r8102e: driver fully initialized and listening via IRQs!");
             return true;
         }
 
@@ -290,9 +306,18 @@ namespace RTL8102E_Driver
             return true;
         }
 
-        public void Poll()
+        public void HandleInterrupt(ref Cosmos.Core.INTs.IRQContext context)
         {
-            // 1. Process RX Ring
+            // 1. Read Interrupt Status Register (0x3E)
+            ushort status = mmio.Words[0x3E];
+            
+            if (status == 0)
+                return; // Not our interrupt
+
+            LastIsr = status;
+            IrqCount++;
+
+            // 2. Process RX Ring
             while (true)
             {
                 uint offset = (uint)(currentRxDesc * 16);
@@ -317,7 +342,7 @@ namespace RTL8102E_Driver
                 // Send to NetworkStack
                 if (DataReceived != null)
                 {
-                    Console.WriteLine($"[RX] Passing {length} bytes to NetworkStack");
+                    Console.WriteLine($"[RX] Passing {length} bytes to NetworkStack via IRQ");
                     DataReceived(packet);
                 }
                 
@@ -329,17 +354,9 @@ namespace RTL8102E_Driver
                 
                 currentRxDesc = (currentRxDesc + 1) % 4;
             }
-
-            // 2. Read and Clear Interrupt Status Register (0x3E)
-            ushort status = mmio.Words[0x3E];
-            if (status != 0)
-            {
-                LastIsr = status;
-                IrqCount++;
-                
-                // Acknowledge by writing the exact same bits back to ISR
-                mmio.Words[0x3E] = status;
-            }
+            
+            // 3. Acknowledge by writing the exact same bits back to ISR
+            mmio.Words[0x3E] = status;
         }
     }
 }
