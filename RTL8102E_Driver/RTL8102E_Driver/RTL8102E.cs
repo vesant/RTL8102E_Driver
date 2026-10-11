@@ -198,7 +198,8 @@ namespace RTL8102E_Driver
             for (int i = 0; i < 4; i++)
             {
                 uint offset = (uint)(i * 16);
-                Write32(txDescBlock, offset, 0);
+                uint txCmd = (i == 3) ? 0x40000000u : 0u;
+                Write32(txDescBlock, offset, txCmd);
                 Write32(txDescBlock, offset + 4, 0); // Vlan
                 Write32(txDescBlock, offset + 8, (uint)txBuffers[i].Offset); // Buffer Address Low
                 Write32(txDescBlock, offset + 12, (uint)(txBuffers[i].Offset >> 32)); // Buffer Address High
@@ -232,33 +233,39 @@ namespace RTL8102E_Driver
 
         private bool Phase4And5()
         {
+            Console.WriteLine("r8102e: configuring RxConfig and TxConfig...");
+            // RxConfig (0x44): Accept Broadcast (0x08), Multicast (0x04), Physical Match (0x02), Unlimited FIFO (0x700), Max DMA (0xE000) -> 0x0000E70E
+            mmio.DWords[0x44] = 0x0000E70E;
+            
+            // TxConfig (0x40): Max DMA burst
+            mmio.DWords[0x40] = 0x60000000;
+
+            // RxMaxSize (0xDA): 1536 bytes
+            mmio.Words[0xDA] = 0x0600;
+
             Console.WriteLine("r8102e: enabling RX and TX in CR...");
             // Command Register (0x37): RE=0x08, TE=0x04 -> 0x0C
             mmio.Bytes[0x37] = 0x0C;
-            
-            // Force Clear PCI 'Interrupt Disable' bit (Bit 10) in PCI Command Register (Offset 0x04)
-            // Some BIOSes leave this bit set to 1, completely muting the PCI INTx# line!
-            uint pciCmd = pciDevice.ReadRegister32(0x04);
-            pciCmd &= ~(uint)(1 << 10);
-            pciDevice.WriteRegister32(0x04, pciCmd);
 
-            byte irq = pciDevice.InterruptLine;
-            Console.WriteLine($"r8102e: binding hardware IRQ to INT {irq} (and common fallbacks)...");
-            
-            // Bind to the exact IRQ reported by PCI
-            Cosmos.Core.INTs.SetIrqHandler(irq, HandleInterrupt);
-            
-            // In many Bare-Metal scenarios, ACPI/PIC routing lies about the true IRQ.
-            // We bind to the holy trinity of PCI IRQs just in case to catch rogue signals.
-            if (irq != 9) Cosmos.Core.INTs.SetIrqHandler(9, HandleInterrupt);
-            if (irq != 10) Cosmos.Core.INTs.SetIrqHandler(10, HandleInterrupt);
-            if (irq != 11) Cosmos.Core.INTs.SetIrqHandler(11, HandleInterrupt);
+            Console.WriteLine("r8102e: verifying PHY Link Status...");
+            // PHYStatus register is at offset 0x6C (8-bit)
+            // Bit 1 indicates Link Status (1 = UP, 0 = DOWN)
+            byte phyStatus = mmio.Bytes[0x6C];
+            if ((phyStatus & 0x02) != 0)
+            {
+                Console.WriteLine("r8102e: PHY Link is UP! Cable connected.");
+            }
+            else
+            {
+                Console.WriteLine("r8102e: PHY Link is DOWN. Please check the network cable.");
+            }
 
-            Console.WriteLine("r8102e: unmasking interrupts in IMR...");
-            // Interrupt Mask Register (0x3C): ROK=0x0001, RER=0x0002, TOK=0x0004, TER=0x0008, RxOverflow=0x0010
-            mmio.Words[0x3C] = 0x001F;
+            Console.WriteLine("r8102e: masking all hardware interrupts in IMR (switching back to Polling mode)...");
+            // Interrupt Mask Register (0x3C): 0x0000 ensures no hardware INTA# is generated
+            // This prevents Cosmos OS deadlocks caused by single-core PIT timer blocking.
+            mmio.Words[0x3C] = 0x0000;
 
-            Console.WriteLine("r8102e: driver fully initialized and listening via IRQs!");
+            Console.WriteLine("r8102e: driver fully initialized and ready for HackPoll!");
             return true;
         }
 
@@ -267,9 +274,16 @@ namespace RTL8102E_Driver
         public override bool QueueBytes(byte[] buffer, int offset, int length)
         {
             uint descOffset = (uint)(currentTxDesc * 16);
-            uint cmdStatus = Read32(txDescBlock, descOffset);
             
-            // Check if MAC still owns the descriptor
+            // Wait briefly for descriptor if still owned by NIC
+            int spins = 5000;
+            while ((Read32(txDescBlock, descOffset) & 0x80000000) != 0 && spins > 0)
+            {
+                mmio.Bytes[0x38] = 0x40; // Kick doorbell in case previous poll was missed
+                spins--;
+            }
+
+            uint cmdStatus = Read32(txDescBlock, descOffset);
             if ((cmdStatus & 0x80000000) != 0)
                 return false; // Queue full!
 
@@ -280,7 +294,7 @@ namespace RTL8102E_Driver
             }
 
             // Ethernet requires a minimum payload of 60 bytes (excluding CRC).
-            // ARP replies are only 42 bytes. RTL8102E does NOT auto-pad runts!
+            // RTL8102E does NOT auto-pad runts!
             uint txLength = (uint)length;
             if (txLength < 60)
             {
@@ -299,25 +313,19 @@ namespace RTL8102E_Driver
             
             // Trigger TX poll (TxPoll register 0x38 = 0x40)
             mmio.Bytes[0x38] = 0x40;
-            
-            Console.WriteLine($"[TX] Sent {txLength} bytes to MAC (Desc {currentTxDesc}) - original {length}");
+            mmio.Bytes[0x38] = 0x40; // Double kick (Linux 8168 doorbell hack)
             
             currentTxDesc = (currentTxDesc + 1) % 4;
             return true;
         }
 
-        public void HandleInterrupt(ref Cosmos.Core.INTs.IRQContext context)
+        /// <summary>
+        /// HackPoll intercepts the hardware directly, bypassing Cosmos OS IRQs.
+        /// This avoids full system freezes on single-core devices when Cosmos blocks.
+        /// </summary>
+        public void HackPoll()
         {
-            // 1. Read Interrupt Status Register (0x3E)
-            ushort status = mmio.Words[0x3E];
-            
-            if (status == 0)
-                return; // Not our interrupt
-
-            LastIsr = status;
-            IrqCount++;
-
-            // 2. Process RX Ring
+            // 1. Process RX Ring
             while (true)
             {
                 uint offset = (uint)(currentRxDesc * 16);
@@ -339,10 +347,9 @@ namespace RTL8102E_Driver
                     packet[i] = rxBuffers[currentRxDesc][i];
                 }
 
-                // Send to NetworkStack
+                // Send to NetworkStack (or our custom Interceptor)
                 if (DataReceived != null)
                 {
-                    Console.WriteLine($"[RX] Passing {length} bytes to NetworkStack via IRQ");
                     DataReceived(packet);
                 }
                 
@@ -354,9 +361,27 @@ namespace RTL8102E_Driver
                 
                 currentRxDesc = (currentRxDesc + 1) % 4;
             }
-            
-            // 3. Acknowledge by writing the exact same bits back to ISR
-            mmio.Words[0x3E] = status;
+
+            // 2. Transmit Watchdog: check if any TX descriptor is pending and kick TPPOLL
+            for (int t = 0; t < 4; t++)
+            {
+                if ((Read32(txDescBlock, (uint)(t * 16)) & 0x80000000) != 0)
+                {
+                    mmio.Bytes[0x38] = 0x40;
+                    break;
+                }
+            }
+
+            // 3. Read and Clear Interrupt Status Register (0x3E)
+            ushort status = mmio.Words[0x3E];
+            if (status != 0)
+            {
+                LastIsr = status;
+                IrqCount++;
+                
+                // Acknowledge by writing the exact same bits back to ISR
+                mmio.Words[0x3E] = status;
+            }
         }
     }
 }

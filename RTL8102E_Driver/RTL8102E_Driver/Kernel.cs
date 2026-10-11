@@ -17,16 +17,27 @@ namespace RTL8102E_Driver {
             
             if (result)
             {
-                Console.WriteLine("r8102e: init success. configuring NetworkStack...");
+                Console.WriteLine("r8102e: Driver ready! Initiating bare-metal DHCP...");
                 
-                // Set static IP to 192.168.31.100 just for testing (matching user subnet)
-                var ip = new Sys.Network.IPv4.Address(192, 168, 31, 100);
-                var subnet = new Sys.Network.IPv4.Address(255, 255, 255, 0);
-                var gw = new Sys.Network.IPv4.Address(192, 168, 31, 1);
-                var config = new Sys.Network.Config.IPConfig(ip, subnet, gw);
-                Sys.Network.NetworkStack.ConfigIP(driver, config);
+                var dhcp = new CustomDHCP(driver);
+                var assignedIp = dhcp.DoAutoConfig();
 
-                Console.WriteLine("r8102e: NetworkStack bound successfully to 192.168.31.100!");
+                if (assignedIp != null)
+                {
+                    // Bind the newly grabbed IP to the Cosmos NetworkStack
+                    var subnet = new Sys.Network.IPv4.Address(255, 255, 255, 0); // Fake subnet for testing
+                    var ipAddr = new Sys.Network.IPv4.Address(assignedIp[0], assignedIp[1], assignedIp[2], assignedIp[3]);
+                    var gwAddr = new Sys.Network.IPv4.Address(assignedIp[0], assignedIp[1], assignedIp[2], 1); // Fake gateway
+                    
+                    var config = new Sys.Network.Config.IPConfig(ipAddr, subnet, gwAddr);
+                    Sys.Network.NetworkStack.ConfigIP(driver, config);
+                    
+                    Console.WriteLine($"r8102e: NetworkStack bound successfully to {assignedIp[0]}.{assignedIp[1]}.{assignedIp[2]}.{assignedIp[3]} !");
+                }
+                else
+                {
+                    Console.WriteLine("r8102e: DHCP failed. Cannot configure NetworkStack.");
+                }
             }
             else
             {
