@@ -1,8 +1,21 @@
-using System;
+// ==============================================================================
+// GHOST OS - ALL-IN-ONE NETWORK DRIVER & DIAGNOSTIC SYSTEM v2.0
+// Realtek RTL8102E Fast Ethernet & Atheros AR2425 802.11b/g Wi-Fi Driver
+// Bare-Metal IEEE 802.11i WPA2-PSK 4-Way Handshake & Hardware CCMP Keytable
+// Author: ghost
+// ==============================================================================
+
+using Cosmos.Core;
+using Cosmos.HAL.Network;
+using Cosmos.HAL;
+using Cosmos.System.Network.IPv4;
+using Sys = Cosmos.System;
 using System.Collections.Generic;
 using System.Text;
-using Cosmos.Core;
-using Cosmos.HAL;
+using System;
+
+namespace RTL8102E_Driver
+{
 
 namespace Cosmos.HAL
 {
@@ -26,7 +39,6 @@ namespace Cosmos.HAL
     }
 }
 
-namespace RTL8102E_Driver
 {
     [Cosmos.HAL.Driver(Cosmos.HAL.DriverType.Network, "Realtek RTL8102E/RTL8136 PCI Ethernet")]
     [Cosmos.HAL.Author("ghost")]
@@ -489,7 +501,9 @@ namespace RTL8102E_Driver
             }
         }
     }
+}
 
+{
     public class CustomDHCP
     {
         private RTL8102E _driver;
@@ -793,7 +807,9 @@ namespace RTL8102E_Driver
             packet[offset + 11] = (byte)(sum & 0xFF);
         }
     }
+}
 
+{
     public enum Wpa2HandshakeState
     {
         Idle,
@@ -1443,7 +1459,9 @@ namespace RTL8102E_Driver
             return frame;
         }
     }
+}
 
+{
     /// <summary>
     /// Bare-metal Atheros AR2425 / AR5007EG / AR5212 IEEE 802.11b/g Wireless Driver.
     /// Supports PCI/PCIe Vendor 0x168C (Atheros AR2425, AR5212, AR2413, AR5413, AR2417).
@@ -2823,7 +2841,9 @@ namespace RTL8102E_Driver
         };
         #endregion
     }
+}
 
+{
     public class PciDeviceInfo
     {
         public byte Bus;
@@ -2908,6 +2928,7 @@ namespace RTL8102E_Driver
         private int _currentScreen = 0;
         private int _selectedWifiIdx = 0;
         private int _selectedPciIdx = 0;
+        private static bool _isCapsLock = false;
         private bool _needsRedraw = true;
         private uint _pollTick = 0;
         private string _statusBanner = "Use Arrows [Up/Down], [Enter] Details/Connect, [1-5] Screens, [R] Scan";
@@ -3243,6 +3264,22 @@ namespace RTL8102E_Driver
                 SyncDetectedNetworks();
             }
 
+            bool curCaps = false;
+
+            try { curCaps = Cosmos.System.KeyboardManager.CapsLock; } catch { }
+
+            if (curCaps != _isCapsLock)
+
+            {
+
+                _isCapsLock = curCaps;
+
+                DrawCapsLockPopup(_isCapsLock);
+
+            }
+
+
+
             _pollTick++;
 
             if (Console.KeyAvailable)
@@ -3261,6 +3298,13 @@ namespace RTL8102E_Driver
 
         private void HandleKeyPress(ConsoleKeyInfo key)
         {
+            if ((int)key.Key == 20 || key.Key == ConsoleKey.F12)
+            {
+                _isCapsLock = !_isCapsLock;
+                try { Cosmos.System.KeyboardManager.CapsLock = _isCapsLock; } catch { }
+                DrawCapsLockPopup(_isCapsLock);
+                return;
+            }
             // Global screen shortcuts
             if (key.Key == ConsoleKey.F1 || key.KeyChar == '1') { _currentScreen = 0; return; }
             if (key.Key == ConsoleKey.F2 || key.KeyChar == '2') { _currentScreen = 2; return; }
@@ -3384,6 +3428,7 @@ namespace RTL8102E_Driver
             Console.WriteLine(" GHOST OS - DUAL-ANTENNA WI-FI MANAGER & RTL8102E DIAGNOSTICS v2.0   ");
             Console.WriteLine("===============================================================================");
             Console.BackgroundColor = ConsoleColor.Black;
+            DrawCapsLockPopup(_isCapsLock);
 
             bool linkUp = _ethDriver != null && _ethDriver.IsPhyLinkUp();
             string ipStr = FormatIp(CurrentIp);
@@ -3816,7 +3861,7 @@ namespace RTL8102E_Driver
             if (!ap.IsOpen)
             {
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.Write("  Enter Wi-Fi Password: ");
+                Console.Write("  Enter Wi-Fi Password (Visible) [F12=CapsLock]: ");
                 pwd = ReadPasswordWhilePolling();
                 if (pwd == null)
                 {
@@ -3877,7 +3922,8 @@ namespace RTL8102E_Driver
 
                 Console.WriteLine("  [4/4] Awaiting EAPOL-Key 4-Way Handshake with Access Point...");
 
-                int timeoutTicks = 500;
+                int timeoutTicks = 4500; // 5-6s robust handshake window
+                int dotStep = 0;
                 while (_wifiDriver != null &&
                        _wifiDriver.Wpa2Engine != null &&
                        _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Completed &&
@@ -3888,6 +3934,16 @@ namespace RTL8102E_Driver
                     if (_ethDriver != null) _ethDriver.HackPoll();
                     for (int spin = 0; spin < 1000; spin++) IOPort.Wait();
                     timeoutTicks--;
+                    dotStep++;
+                    if ((dotStep % 350) == 0)
+                    {
+                        Console.Write(".");
+                        // If still waiting for Message 1 after 1.5s, resend Association Request to wake up AP
+                        if (_wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.WaitingMsg1 && (dotStep % 700 == 0))
+                        {
+                            _wifiDriver.SendAssocRequestFrame(_wifiDriver.Wpa2Engine.ApBssid, ap.Ssid, true);
+                        }
+                    }
                 }
 
                 if (_wifiDriver != null && _wifiDriver.Wpa2Engine != null && _wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.Completed)
@@ -4021,17 +4077,72 @@ namespace RTL8102E_Driver
             }
         }
 
+        public static void DrawCapsLockPopup(bool isCaps)
+        {
+            int origLeft = 0;
+            int origTop = 0;
+            try
+            {
+                origLeft = Console.CursorLeft;
+                origTop = Console.CursorTop;
+            }
+            catch { }
+
+            ConsoleColor origFg = Console.ForegroundColor;
+            ConsoleColor origBg = Console.BackgroundColor;
+
+            try
+            {
+                Console.SetCursorPosition(59, 1);
+                if (isCaps)
+                {
+                    Console.BackgroundColor = ConsoleColor.Red;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.Write(" [CAPS LOCK: ON ] ");
+                }
+                else
+                {
+                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.Write(" [CAPS LOCK: OFF] ");
+                }
+                Console.SetCursorPosition(origLeft, origTop);
+            }
+            catch { }
+
+            Console.BackgroundColor = origBg;
+            Console.ForegroundColor = origFg;
+        }
+
         private string ReadPasswordWhilePolling()
         {
-            return ReadLineWhilePolling(true);
+            return ReadLineWhilePolling(false); // Password is fully VISIBLE as requested
         }
 
         private string ReadLineWhilePolling(bool maskChars)
         {
             string input = "";
+            try
+            {
+                _isCapsLock = Cosmos.System.KeyboardManager.CapsLock;
+            }
+            catch { }
+            DrawCapsLockPopup(_isCapsLock);
+
+            int startCol = 0;
+            int startRow = 0;
+            try
+            {
+                startCol = Console.CursorLeft;
+                startRow = Console.CursorTop;
+            }
+            catch { }
+
             while (true)
             {
                 if (_ethDriver != null) _ethDriver.HackPoll();
+                if (_wifiDriver != null) _wifiDriver.PollRx();
+
                 if (Console.KeyAvailable)
                 {
                     var k = Console.ReadKey(true);
@@ -4041,20 +4152,71 @@ namespace RTL8102E_Driver
                         Console.WriteLine();
                         return input;
                     }
+
+                    if ((int)k.Key == 20 || k.Key == ConsoleKey.F12)
+                    {
+                        _isCapsLock = !_isCapsLock;
+                        try { Cosmos.System.KeyboardManager.CapsLock = _isCapsLock; } catch { }
+                        DrawCapsLockPopup(_isCapsLock);
+                        continue;
+                    }
+
                     if (k.Key == ConsoleKey.Backspace)
                     {
                         if (input.Length > 0)
                         {
                             input = input.Substring(0, input.Length - 1);
-                            Console.Write("\b \b");
+                            try
+                            {
+                                Console.SetCursorPosition(startCol, startRow);
+                                Console.Write(new string(' ', 64));
+                                Console.SetCursorPosition(startCol, startRow);
+                                Console.Write(maskChars ? new string('*', input.Length) : input);
+                            }
+                            catch
+                            {
+                                Console.Write("\b \b");
+                            }
                         }
                     }
-                    else if (k.KeyChar >= 32 && k.KeyChar <= 126 && input.Length < 32)
+                    else if (input.Length < 63)
                     {
-                        input += k.KeyChar;
-                        Console.Write(maskChars ? '*' : k.KeyChar);
+                        char c = k.KeyChar;
+                        if (c >= 32 && c <= 126)
+                        {
+                            bool shift = (k.Modifiers & ConsoleModifiers.Shift) != 0;
+                            if (c >= 'a' && c <= 'z')
+                            {
+                                if (_isCapsLock ^ shift) c = (char)(c - 32);
+                            }
+                            else if (c >= 'A' && c <= 'Z')
+                            {
+                                if (!(_isCapsLock ^ shift)) c = (char)(c + 32);
+                            }
+
+                            input += c;
+                            Console.Write(maskChars ? '*' : c);
+                        }
                     }
                 }
+
+                bool pollCaps = false;
+
+                try { pollCaps = Cosmos.System.KeyboardManager.CapsLock; } catch { }
+
+                if (pollCaps != _isCapsLock)
+
+                {
+
+                    _isCapsLock = pollCaps;
+
+                    DrawCapsLockPopup(_isCapsLock);
+
+                }
+
+
+
+                for (int spin = 0; spin < 20; spin++) IOPort.Wait();
             }
         }
 
@@ -4117,4 +4279,6 @@ namespace RTL8102E_Driver
             return Hex16((ushort)(dw >> 16)) + Hex16((ushort)(dw & 0xFFFF));
         }
     }
+}
+
 }
