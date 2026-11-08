@@ -270,12 +270,13 @@ namespace RTL8102E_Driver
             ushort w1 = ReadEepromWord(0x1E);
             ushort w0 = ReadEepromWord(0x1D);
 
-            MacAddress[0] = (byte)(w2 & 0xFF);
-            MacAddress[1] = (byte)((w2 >> 8) & 0xFF);
-            MacAddress[2] = (byte)(w1 & 0xFF);
-            MacAddress[3] = (byte)((w1 >> 8) & 0xFF);
-            MacAddress[4] = (byte)(w0 & 0xFF);
-            MacAddress[5] = (byte)((w0 >> 8) & 0xFF);
+            // IEEE 802 Atheros EEPROM layout: high byte is first octet of word
+            MacAddress[0] = (byte)((w2 >> 8) & 0xFF);
+            MacAddress[1] = (byte)(w2 & 0xFF);
+            MacAddress[2] = (byte)((w1 >> 8) & 0xFF);
+            MacAddress[3] = (byte)(w1 & 0xFF);
+            MacAddress[4] = (byte)((w0 >> 8) & 0xFF);
+            MacAddress[5] = (byte)(w0 & 0xFF);
 
             // If EEPROM read was blank (00:00:00:00:00:00 or FF:FF:FF:FF:FF:FF), use Atheros fallback
             if ((MacAddress[0] == 0 && MacAddress[1] == 0 && MacAddress[2] == 0) ||
@@ -465,11 +466,17 @@ namespace RTL8102E_Driver
             WriteReg(AR5K_TXCFG, 0x00000015); // 128-byte DMA bursts
             WriteReg(AR5K_RXCFG, 0x00000005); // 128-byte DMA bursts
 
-            // Setup TX Queue 0 for active Probe Requests
+            // Setup TX Queue 0 and DCU 0 (Critical for hardware transmit backoff clocks)
             WriteReg(AR5K_QUEUE_QCUMASK_0, 0x01);
-            WriteReg(AR5K_QUEUE_DFS_LOCAL_IFS_0, 0x002FFC0F);
-            WriteReg(AR5K_QUEUE_DFS_RETRY_LIMIT_0, 0x0000000A);
+            WriteReg(AR5K_QUEUE_DFS_LOCAL_IFS_0, 0x002FFC0F); // CW_MIN=15, CW_MAX=1023, AIFS=2
+            WriteReg(AR5K_QUEUE_DFS_RETRY_LIMIT_0, 0x00040404); // Retry limits
             WriteReg(AR5K_QUEUE_MISC_0, 0);
+            
+            // Global DCU IFS Timers (SIFS=10us, Slot=9us for 802.11g at 40MHz clock)
+            WriteReg(0x1030, 0x00000190); // AR5K_DCU_GBL_IFS_SIFS (400 clocks)
+            WriteReg(0x1070, 0x00000168); // AR5K_DCU_GBL_IFS_SLOT (360 clocks)
+            WriteReg(0x1074, 0x00000500); // AR5K_DCU_GBL_IFS_EIFS (1280 clocks)
+            WriteReg(0x1100, 0x00000000); // AR5K_DCU_MISC_0
 
             // Start RX DMA
             WriteReg(AR5K_RXDP, _rxDescPhys);
@@ -740,11 +747,14 @@ namespace RTL8102E_Driver
             }
             else if (frameType == 0xB0) // 802.11 Open Authentication Response
             {
-                if (pkt.Length >= 30)
+                if (pkt.Length >= 26)
                 {
-                    ushort seq = (ushort)(pkt[26] | (pkt[27] << 8));
-                    ushort status = (ushort)(pkt[28] | (pkt[29] << 8));
-                    if (seq == 2 && status == 0)
+                    ushort seq = pkt.Length >= 28 ? (ushort)(pkt[26] | (pkt[27] << 8)) : (ushort)2;
+                    ushort status = pkt.Length >= 30 ? (ushort)(pkt[28] | (pkt[29] << 8)) : (ushort)0;
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("        [AUTH] Response received from AP! (Status: " + status + ")");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    if (status == 0)
                     {
                         LastAuthSuccess = true;
                     }
@@ -752,10 +762,13 @@ namespace RTL8102E_Driver
             }
             else if (frameType == 0x10) // 802.11 Association Response
             {
-                if (pkt.Length >= 28)
+                if (pkt.Length >= 26)
                 {
-                    ushort status = (ushort)(pkt[26] | (pkt[27] << 8));
+                    ushort status = pkt.Length >= 28 ? (ushort)(pkt[26] | (pkt[27] << 8)) : (ushort)0;
                     ushort aid = pkt.Length >= 30 ? (ushort)(pkt[28] | (pkt[29] << 8)) : (ushort)1;
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine("        [ASSOC] Response received from AP! (Status: " + status + " AID: " + (aid & 0x3FFF) + ")");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
                     if (status == 0)
                     {
                         LastAssocSuccess = true;
