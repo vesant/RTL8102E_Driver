@@ -6,7 +6,6 @@ using Sys = Cosmos.System;
 namespace RTL8102E_Driver {
     public class Kernel : Sys.Kernel {
         private RTL8102E driver;
-        private uint lastIrqCount = 0;
 
         protected override void BeforeRun() {
             Console.WriteLine("Cosmos kernel ready.");
@@ -24,15 +23,18 @@ namespace RTL8102E_Driver {
 
                 if (assignedIp != null)
                 {
-                    // Bind the newly grabbed IP to the Cosmos NetworkStack
-                    var subnet = new Sys.Network.IPv4.Address(255, 255, 255, 0); // Fake subnet for testing
+                    // Bind the newly grabbed IP and Gateway to the Cosmos NetworkStack
+                    byte[] mask = dhcp.SubnetMask ?? new byte[] { 255, 255, 255, 0 };
+                    byte[] gw = dhcp.GatewayIp ?? new byte[] { assignedIp[0], assignedIp[1], assignedIp[2], 1 };
+
+                    var subnet = new Sys.Network.IPv4.Address(mask[0], mask[1], mask[2], mask[3]);
                     var ipAddr = new Sys.Network.IPv4.Address(assignedIp[0], assignedIp[1], assignedIp[2], assignedIp[3]);
-                    var gwAddr = new Sys.Network.IPv4.Address(assignedIp[0], assignedIp[1], assignedIp[2], 1); // Fake gateway
+                    var gwAddr = new Sys.Network.IPv4.Address(gw[0], gw[1], gw[2], gw[3]);
                     
                     var config = new Sys.Network.Config.IPConfig(ipAddr, subnet, gwAddr);
                     Sys.Network.NetworkStack.ConfigIP(driver, config);
                     
-                    Console.WriteLine($"r8102e: NetworkStack bound successfully to {assignedIp[0]}.{assignedIp[1]}.{assignedIp[2]}.{assignedIp[3]} !");
+                    Console.WriteLine($"r8102e: NetworkStack bound successfully to {assignedIp[0]}.{assignedIp[1]}.{assignedIp[2]}.{assignedIp[3]} (Gateway: {gw[0]}.{gw[1]}.{gw[2]}.{gw[3]})!");
                 }
                 else
                 {
@@ -48,6 +50,7 @@ namespace RTL8102E_Driver {
         protected override void Run() {
             if (driver != null)
             {
+                driver.HackPoll();
                 Sys.Network.NetworkStack.Update();
             }
         }
