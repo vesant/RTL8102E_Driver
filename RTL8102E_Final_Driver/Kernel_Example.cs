@@ -12,7 +12,7 @@ namespace RTL8102E_Driver {
 
         protected override void BeforeRun() {
             Console.WriteLine("Cosmos kernel ready.");
-            Console.WriteLine("loading r8102e + dual-antenna wifi diagnostic module...");
+            Console.WriteLine("Loading RTL8102E Fast Ethernet + Atheros AR2425 Dual-Antenna Wi-Fi modules...");
             
             driver = new RTL8102E();
             bool result = driver.Initialize();
@@ -23,7 +23,7 @@ namespace RTL8102E_Driver {
             
             if (result)
             {
-                Console.WriteLine("r8102e: Driver ready! Initiating bare-metal DHCP...");
+                Console.WriteLine("r8102e: Driver ready! Initiating bare-metal DHCP negotiation...");
                 
                 dhcp = new CustomDHCP(driver);
                 assignedIp = dhcp.DoAutoConfig();
@@ -42,33 +42,33 @@ namespace RTL8102E_Driver {
                     var config = new Sys.Network.Config.IPConfig(ipAddr, subnet, gwAddr);
                     Sys.Network.NetworkStack.ConfigIP(driver, config);
                     
-                    Console.WriteLine($"r8102e: NetworkStack bound successfully to {assignedIp[0]}.{assignedIp[1]}.{assignedIp[2]}.{assignedIp[3]} (Gateway: {gw[0]}.{gw[1]}.{gw[2]}.{gw[3]})!");
+                    Console.WriteLine($"r8102e: NetworkStack successfully bound to {assignedIp[0]}.{assignedIp[1]}.{assignedIp[2]}.{assignedIp[3]} (Gateway: {gw[0]}.{gw[1]}.{gw[2]}.{gw[3]})!");
                 }
                 else
                 {
-                    Console.WriteLine("r8102e: DHCP failed. Cannot configure NetworkStack.");
+                    Console.WriteLine("r8102e: DHCP failed. Unable to configure NetworkStack.");
                 }
             }
             else
             {
-                Console.WriteLine("r8102e: probe failed.");
+                Console.WriteLine("r8102e: PCI probe failed.");
             }
 
-            Console.WriteLine("loading Atheros AR2425 802.11b/g bare-metal wireless driver...");
+            Console.WriteLine("ath5k: Initializing Atheros AR2425 802.11b/g bare-metal wireless driver...");
             wifiDriver = new AtherosAR2425Driver();
             bool wifiResult = wifiDriver.FindAndInitialize();
             if (wifiResult)
             {
-                Console.WriteLine("ath5k: Atheros AR2425 wireless radio initialized and tuned!");
-                Console.WriteLine("ath5k: performing initial 802.11 channel scan (Ch 1..13)...");
+                Console.WriteLine("ath5k: Atheros AR2425 wireless radio initialized and calibrated!");
+                Console.WriteLine("ath5k: Performing initial 802.11 RF channel sweep (Ch 1..13)...");
                 wifiDriver.ScanAllChannels();
             }
             else
             {
-                Console.WriteLine("ath5k: Atheros AR2425 not detected on PCI bus.");
+                Console.WriteLine("ath5k: Atheros AR2425 adapter not detected on PCI bus.");
             }
 
-            Console.WriteLine("A carregar Menu Interativo Wi-Fi & Hardware Inspector...");
+            Console.WriteLine("Loading Interactive Wi-Fi & Hardware Inspector Menu...");
             menu = new NetworkMenuManager(driver, wifiDriver, dhcp, assignedIp, mask, gw, dns);
         }
 

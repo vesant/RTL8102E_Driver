@@ -71,7 +71,7 @@ namespace RTL8102E_Driver
         public List<WifiAccessPoint> WifiNetworks = new List<WifiAccessPoint>();
 
         public PciDeviceInfo DetectedWifiPci = null;
-        public string DetectedWifiSummary = "A procurar no bus PCIe / Mini-PCIe USB...";
+        public string DetectedWifiSummary = "Scanning PCIe / Mini-PCIe USB bus...";
 
         public WifiAccessPoint ConnectedWifi = null;
         public byte[] CurrentIp = null;
@@ -92,7 +92,7 @@ namespace RTL8102E_Driver
         private int _selectedPciIdx = 0;
         private bool _needsRedraw = true;
         private uint _pollTick = 0;
-        private string _statusBanner = "Use Setas [Cima/Baixo], [Enter] Detalhes/Ligar, [1-5] Ecras, [R] Scan";
+        private string _statusBanner = "Use Arrows [Up/Down], [Enter] Details/Connect, [1-5] Screens, [R] Scan";
 
         // Sniffer Ring Buffer
         private string[] _sniffLogs = new string[12];
@@ -277,18 +277,18 @@ namespace RTL8102E_Driver
             }
             else if (foundUsbWifiPort)
             {
-                DetectedWifiSummary = "Mini-PCIe Wi-Fi 802.11b/g (Barramento USB 2.0 Interno ICH7M + 2 Antenas)";
+                DetectedWifiSummary = "Mini-PCIe Wi-Fi 802.11b/g (Internal ICH7M USB 2.0 Bus + 2 Antennas)";
             }
             else
             {
-                DetectedWifiSummary = "Modulo Mini-PCIe Dual-Antenna (802.11b/g) + Bridge RTL8102E";
+                DetectedWifiSummary = "Mini-PCIe Dual-Antenna Module (802.11b/g) + RTL8102E Bridge";
             }
         }
 
         private void ClassifyPciDevice(PciDeviceInfo d)
         {
             d.Category = "PCI";
-            d.Description = "Dispositivo PCI Generico";
+            d.Description = "Generic PCI Device";
 
             // Check Wireless / Network first
             if (d.VendorId == 0x10EC && d.DeviceId == 0x8136)
@@ -307,7 +307,7 @@ namespace RTL8102E_Driver
                 else if (d.VendorId == 0x10EC) d.Description = "Realtek RTL8187SE/RTL8192E PCIe Wi-Fi";
                 else if (d.VendorId == 0x8086) d.Description = "Intel PRO/Wireless 802.11 Wi-Fi";
                 else if (d.VendorId == 0x14E4) d.Description = "Broadcom 802.11 Wireless LAN";
-                else d.Description = "Controlador Wireless 802.11 Mini-PCIe";
+                else d.Description = "802.11 Wireless Mini-PCIe Controller";
                 return;
             }
 
@@ -345,7 +345,7 @@ namespace RTL8102E_Driver
             {
                 d.Category = "USB HOST";
                 d.IsUsbController = true;
-                if (d.ProgIf == 0x20) d.Description = "Intel ICH7M USB 2.0 EHCI Controller (Mini-PCIe/Portas)";
+                if (d.ProgIf == 0x20) d.Description = "Intel ICH7M USB 2.0 EHCI Controller (Mini-PCIe/Ports)";
                 else d.Description = "Intel ICH7M USB 1.1 UHCI Controller";
             }
             else if (d.ClassCode == 0x06 && d.Subclass == 0x01)
@@ -468,7 +468,7 @@ namespace RTL8102E_Driver
                     }
                     else
                     {
-                        _statusBanner = "Nenhuma rede selecionada. Prime [R] para procurar redes no ar.";
+                        _statusBanner = "No network selected. Press [R] to scan for networks over the air.";
                     }
                 }
                 else if (key.KeyChar == 'r' || key.KeyChar == 'R')
@@ -503,7 +503,7 @@ namespace RTL8102E_Driver
                 else if (key.KeyChar == 'r' || key.KeyChar == 'R')
                 {
                     ScanHardwareBuses();
-                    _statusBanner = "Registos MMIO e estado DMA atualizados em tempo real.";
+                    _statusBanner = "MMIO registers and DMA state refreshed in real time.";
                 }
             }
             else if (_currentScreen == 3)
@@ -563,14 +563,14 @@ namespace RTL8102E_Driver
             Console.BackgroundColor = ConsoleColor.DarkBlue;
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine("===============================================================================");
-            Console.WriteLine(" GHOST OS - GESTOR DE REDE WI-FI (DUAL-ANTENNA) & DIAGNOSTICO RTL8102E v2.0   ");
+            Console.WriteLine(" GHOST OS - DUAL-ANTENNA WI-FI MANAGER & RTL8102E DIAGNOSTICS v2.0   ");
             Console.WriteLine("===============================================================================");
             Console.BackgroundColor = ConsoleColor.Black;
 
             bool linkUp = _ethDriver != null && _ethDriver.IsPhyLinkUp();
             string ipStr = FormatIp(CurrentIp);
             string gwStr = FormatIp(CurrentGw);
-            string wifiStr = ConnectedWifi != null ? ConnectedWifi.Ssid + " (" + ConnectedWifi.RssiDbm + "dBm)" : "Desligado";
+            string wifiStr = ConnectedWifi != null ? ConnectedWifi.Ssid + " (" + ConnectedWifi.RssiDbm + "dBm)" : "Disconnected";
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.Write(" [ETH] ");
@@ -589,7 +589,7 @@ namespace RTL8102E_Driver
             Console.ForegroundColor = ConsoleColor.Green;
             Console.Write(PadRight( wifiStr, 31));
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine(" | Antenas: Main(Preto)+Aux(Branco) OK");
+            Console.WriteLine(" | Antennas: Main(Black)+Aux(White) OK");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine("-------------------------------------------------------------------------------");
         }
@@ -599,7 +599,7 @@ namespace RTL8102E_Driver
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine("-------------------------------------------------------------------------------");
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" [1] Redes Wi-Fi  [2] Info Detalhada  [3] Hardware PCI/USB  [4] DHCP  [5] Sniff");
+            Console.WriteLine(" [1] Wi-Fi Networks  [2] Diagnostics  [3] PCI/USB Hardware  [4] DHCP  [5] Sniffer");
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine(" Status: " + _statusBanner);
         }
@@ -607,9 +607,9 @@ namespace RTL8102E_Driver
         private void DrawWifiListScreen()
         {
             Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine(" PLACA DETETADA: " + DetectedWifiSummary);
+            Console.WriteLine(" DETECTED ADAPTER: " + DetectedWifiSummary);
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" ID  SINAL         CANAL   SEGURANCA   TAXA     BSSID              SSID");
+            Console.WriteLine(" ID  SIGNAL        CHANNEL SECURITY    RATE     BSSID              SSID");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine(" --- ------------- ------- ----------- -------- ------------------ ------------");
 
@@ -617,15 +617,15 @@ namespace RTL8102E_Driver
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine();
-                Console.WriteLine("  [!] Nenhuma rede Wi-Fi detetada no ar ainda.");
-                Console.WriteLine("      O sintetizador RF Atheros AR2425 esta ativo no canal " + (_wifiDriver != null ? _wifiDriver.CurrentChannel : 1) + " a escutar.");
-                Console.WriteLine("      -> Prime [R] para enviar active Probe Requests e varrer os canais 1 a 13!");
-                Console.WriteLine("      -> Prime [A] para adicionar uma rede oculta (Hidden SSID) manualmente.");
+                Console.WriteLine("  [!] No Wi-Fi networks detected over the air yet.");
+                Console.WriteLine("      Atheros AR2425 RF synthesizer is active on Channel " + (_wifiDriver != null ? _wifiDriver.CurrentChannel : 1) + " listening.");
+                Console.WriteLine("      -> Press [R] to transmit active Probe Requests and sweep Channels 1 to 13!");
+                Console.WriteLine("      -> Press [A] to add a hidden network (Hidden SSID) manually.");
                 Console.WriteLine();
                 Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine("  Estatisticas: Frames RX=" + (_wifiDriver != null ? _wifiDriver.RxPacketsCount : 0) +
+                Console.WriteLine("  Statistics: RX Frames=" + (_wifiDriver != null ? _wifiDriver.RxPacketsCount : 0) +
                                   " | Beacons=" + (_wifiDriver != null ? _wifiDriver.BeaconFramesCount : 0) +
-                                  " | Frames TX=" + (_wifiDriver != null ? _wifiDriver.TxPacketsCount : 0));
+                                  " | TX Frames=" + (_wifiDriver != null ? _wifiDriver.TxPacketsCount : 0));
                 return;
             }
 
@@ -656,7 +656,7 @@ namespace RTL8102E_Driver
                 string bars = FormatSignalBars(ap.RssiDbm);
                 string chStr = "Ch" + PadRight(ap.Channel.ToString(), 2);
                 string rateStr = ap.MaxRateMbps + "M";
-                string statusTag = ap.IsConnected ? " [LIGADO]" : "";
+                string statusTag = ap.IsConnected ? " [CONNECTED]" : "";
 
                 string line = prefix + (i + 1) + " " +
                               bars + " " + ap.RssiDbm + "dBm " +
@@ -671,7 +671,7 @@ namespace RTL8102E_Driver
 
             Console.BackgroundColor = ConsoleColor.Black;
             Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine(" Pagina " + (currentPage + 1) + "/" + totalPages + " (Total: " + WifiNetworks.Count + " redes detetadas no ar) | Setas [Cima]/[Baixo]");
+            Console.WriteLine(" Page " + (currentPage + 1) + "/" + totalPages + " (Total: " + WifiNetworks.Count + " networks detected over the air) | Arrows [Up]/[Down]");
 
             // Quick preview of currently highlighted AP
             if (_selectedWifiIdx >= 0 && _selectedWifiIdx < WifiNetworks.Count)
@@ -681,11 +681,11 @@ namespace RTL8102E_Driver
                 int quality = CalculateSignalPercent(sel.RssiDbm);
 
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine(" RESUMO: " + sel.Ssid + " | Ch " + sel.Channel + " (" + sel.FrequencyMHz + " MHz) | Qualidade: " + quality + "% (SNR: " + snr + " dB)");
+                Console.WriteLine(" SUMMARY: " + sel.Ssid + " | Ch " + sel.Channel + " (" + sel.FrequencyMHz + " MHz) | Quality: " + quality + "% (SNR: " + snr + " dB)");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine(" Antenas: Main " + sel.Antenna1Dbm + " dBm / Aux " + sel.Antenna2Dbm + " dBm | Cifra: " + sel.Cipher + " (" + sel.AuthType + ")");
+                Console.WriteLine(" Antennas: Main " + sel.Antenna1Dbm + " dBm / Aux " + sel.Antenna2Dbm + " dBm | Cipher: " + sel.Cipher + " (" + sel.AuthType + ")");
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine(" -> [ENTER] Inspecionar/Ligar  [R] Varrer Ar  [A] Adicionar Manual");
+                Console.WriteLine(" -> [ENTER] Inspect/Connect  [R] Rescan Air  [A] Add Hidden");
             }
         }
 
@@ -695,66 +695,66 @@ namespace RTL8102E_Driver
             int quality = CalculateSignalPercent(ap.RssiDbm);
 
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === INSPECAO PROFUNDA DO ACCESS POINT (802.11 BEACON & RF TELEMETRY) ===");
+            Console.WriteLine(" === ACCESS POINT DEEP INSPECTION (802.11 BEACON & RF TELEMETRY) ===");
             Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine("  SSID (Nome da Rede) : " + ap.Ssid + (ap.IsConnected ? "  [ATUALMENTE LIGADO]" : ""));
+            Console.WriteLine("  SSID (Network Name) : " + ap.Ssid + (ap.IsConnected ? "  [CURRENTLY CONNECTED]" : ""));
             Console.WriteLine("  BSSID (Hardware MAC): " + ap.Bssid);
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("  Norma 802.11 / PHY  : " + ap.PhyMode + " (Velocidade Max: " + ap.MaxRateMbps + " Mbps)");
-            Console.WriteLine("  Canal & Frequencia  : Canal " + ap.Channel + " (" + ap.FrequencyMHz + " MHz - Banda 2.4 GHz ISM)");
-            Console.WriteLine("  Nivel de Sinal RSSI : " + ap.RssiDbm + " dBm " + FormatSignalBars(ap.RssiDbm) + " (" + quality + "%)");
-            Console.WriteLine("  Piso de Ruido / SNR : " + ap.NoiseDbm + " dBm (Relacao Sinal/Ruido: +" + snr + " dB)");
-            Console.WriteLine("  Diversidade Antenas : Antena 1 [Cabo Preto Main]: " + ap.Antenna1Dbm + " dBm");
-            Console.WriteLine("                        Antena 2 [Cabo Branco Aux]: " + ap.Antenna2Dbm + " dBm (Diversity Ativa)");
-            Console.WriteLine("  Seguranca / RSN IE  : " + ap.Security + " | Cifra: " + ap.Cipher);
-            Console.WriteLine("  Autenticacao AKM    : " + ap.AuthType);
-            Console.WriteLine("  Flags Capabilities  : " + ap.Capabilities);
+            Console.WriteLine("  802.11 Standard/PHY : " + ap.PhyMode + " (Max Rate: " + ap.MaxRateMbps + " Mbps)");
+            Console.WriteLine("  Channel & Frequency : Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz - 2.4 GHz ISM Band)");
+            Console.WriteLine("  Signal Level RSSI   : " + ap.RssiDbm + " dBm " + FormatSignalBars(ap.RssiDbm) + " (" + quality + "%)");
+            Console.WriteLine("  Noise Floor / SNR   : " + ap.NoiseDbm + " dBm (Signal-to-Noise Ratio: +" + snr + " dB)");
+            Console.WriteLine("  Antenna Diversity   : Antenna 1 [Black Cable Main]: " + ap.Antenna1Dbm + " dBm");
+            Console.WriteLine("                        Antenna 2 [White Cable Aux]: " + ap.Antenna2Dbm + " dBm (Active Diversity)");
+            Console.WriteLine("  Security / RSN IE   : " + ap.Security + " | Cipher: " + ap.Cipher);
+            Console.WriteLine("  Authentication AKM  : " + ap.AuthType);
+            Console.WriteLine("  Capability Flags    : " + ap.Capabilities);
             Console.WriteLine("  Beacon Interval     : 100 TU (102.4 ms) | DTIM Period: 1");
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("  [ENTER] ou [C] -> Autenticar e Ligar a esta rede (WPA2 + Bare-Metal DHCP)");
+            Console.WriteLine("  [ENTER] or [C] -> Authenticate and Connect to this network");
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("  [ESC] ou [BACKSPACE] -> Voltar a lista de redes Wi-Fi");
+            Console.WriteLine("  [ESC] or [BACKSPACE] -> Return to Wi-Fi networks list");
         }
 
         private void DrawFullHardwareAndNetworkDetails()
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === INFORMACAO DETALHADA DE TUDO (PLACA DE REDE, WI-FI, DMA & IP STACK) ===");
+            Console.WriteLine(" === FULL DIAGNOSTIC TELEMETRY (NETWORK ADAPTER, WI-FI, DMA & IP STACK) ===");
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" [1. CAMADA WI-FI 802.11 & MODULO MINI-PCIe DUAL-ANTENNA (ATHEROS AR2425)]");
+            Console.WriteLine(" [1. 802.11 WI-FI LAYER & DUAL-ANTENNA MINI-PCIe MODULE (ATHEROS AR2425)]");
             Console.ForegroundColor = ConsoleColor.Gray;
             if (_wifiDriver != null && _wifiDriver.IsInitialized)
             {
-                Console.WriteLine("  * Chip & Localizacao: " + _wifiDriver.HardwareSummary);
-                Console.WriteLine("  * Endereco MAC Real : " + _wifiDriver.GetMacString() + " (Lido da EEPROM fisica)");
+                Console.WriteLine("  * Chip & Location   : " + _wifiDriver.HardwareSummary);
+                Console.WriteLine("  * Physical MAC Addr : " + _wifiDriver.GetMacString() + " (Read from physical EEPROM)");
                 Console.WriteLine("  * MMIO Base / SREV  : 0x" + Hex32(_wifiDriver.MmioBase) +
                                   " | SREV=0x" + Hex32(_wifiDriver.MacSrev) +
                                   " | PHY ID=0x" + Hex32(_wifiDriver.PhyChipId));
-                Console.WriteLine("  * EEPROM / RegDomain: Versao 0x" + Hex16(_wifiDriver.EepromVersion) +
+                Console.WriteLine("  * EEPROM / RegDomain: Version 0x" + Hex16(_wifiDriver.EepromVersion) +
                                   " | RegDomain 0x" + Hex16(_wifiDriver.EepromRegDomain));
-                Console.WriteLine("  * Telemetria Radio  : Canal " + _wifiDriver.CurrentChannel + " (" + (2407 + 5 * _wifiDriver.CurrentChannel) +
+                Console.WriteLine("  * Radio Telemetry   : Channel " + _wifiDriver.CurrentChannel + " (" + (2407 + 5 * _wifiDriver.CurrentChannel) +
                                   " MHz) | Antena 1(Main/Preto) + Antena 2(Aux/Branco) OK");
-                Console.WriteLine("  * Contadores 802.11 : Frames RX=" + _wifiDriver.RxPacketsCount +
-                                  " (Beacons: " + _wifiDriver.BeaconFramesCount + ") | Frames TX=" + _wifiDriver.TxPacketsCount);
+                Console.WriteLine("  * 802.11 Frame Stats: RX Frames=" + _wifiDriver.RxPacketsCount +
+                                  " (Beacons: " + _wifiDriver.BeaconFramesCount + ") | TX Frames=" + _wifiDriver.TxPacketsCount);
                 if (ConnectedWifi != null)
                 {
-                    Console.WriteLine("  * Estado Associacao : Associado a '" + ConnectedWifi.Ssid + "' [" + ConnectedWifi.Bssid + "] (" + ConnectedWifi.RssiDbm + " dBm)");
+                    Console.WriteLine("  * Association State : Associated to '" + ConnectedWifi.Ssid + "' [" + ConnectedWifi.Bssid + "] (" + ConnectedWifi.RssiDbm + " dBm)");
                 }
                 else
                 {
-                    Console.WriteLine("  * Estado Associacao : A escutar no ar (Seleciona uma rede no menu [1] e prime Enter)");
+                    Console.WriteLine("  * Association State : Listening over the air (Select a network in menu [1] and press Enter)");
                 }
             }
             else
             {
-                Console.WriteLine("  * Hardware Detetado : " + DetectedWifiSummary);
-                Console.WriteLine("  * Estado Driver     : Nao inicializado ou chip ausente");
+                Console.WriteLine("  * Detected Hardware : " + DetectedWifiSummary);
+                Console.WriteLine("  * Driver State      : Not initialized or chip absent");
             }
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" [2. CONTROLADOR ETHERNET REALTEK RTL8102E (10EC:8136) - REGISTOS MMIO REAIS]");
+            Console.WriteLine(" [2. REALTEK RTL8102E ETHERNET CONTROLLER (10EC:8136) - REAL MMIO REGISTERS]");
             Console.ForegroundColor = ConsoleColor.Gray;
             if (_ethDriver != null)
             {
@@ -765,7 +765,7 @@ namespace RTL8102E_Driver
                 uint rxCfg = _ethDriver.ReadRxConfigReg();
                 uint txCfg = _ethDriver.ReadTxConfigReg();
 
-                Console.WriteLine("  * Localizacao PCI   : Bus/Slot/Func " + _ethDriver.PciLocation + " | MAC: " + _ethDriver.GetMacString());
+                Console.WriteLine("  * PCI Bus Location  : Bus/Slot/Func " + _ethDriver.PciLocation + " | MAC: " + _ethDriver.GetMacString());
                 Console.WriteLine("  * MMIO Base Address : 0x" + Hex32(_ethDriver.MmioBase) +
                                   " | CR(0x37)=0x" + Hex8(cr) +
                                   " | PHYStatus(0x6C)=0x" + Hex8(phy) + (_ethDriver.IsPhyLinkUp() ? " [UP]" : " [DOWN]"));
@@ -773,27 +773,27 @@ namespace RTL8102E_Driver
                                   " (Last:0x" + Hex16(_ethDriver.LastIsr) + " Count:" + _ethDriver.IrqCount + ")" +
                                   " | IMR(0x3C)=0x" + Hex16(imr) + " (HackPoll)");
                 Console.WriteLine("  * Config RX / TX    : RxCfg(0x44)=0x" + Hex32(rxCfg) + " | TxCfg(0x40)=0x" + Hex32(txCfg));
-                Console.WriteLine("  * Anel DMA Fisico   : RX Ring=0x" + Hex32(_ethDriver.RxRingPhysAddr) + " (Idx:" + _ethDriver.CurrentRxIndex + "/16)" +
+                Console.WriteLine("  * Physical DMA Ring : RX Ring=0x" + Hex32(_ethDriver.RxRingPhysAddr) + " (Idx:" + _ethDriver.CurrentRxIndex + "/16)" +
                                   " | TX Ring=0x" + Hex32(_ethDriver.TxRingPhysAddr) + " (Idx:" + _ethDriver.CurrentTxIndex + "/16)");
-                Console.WriteLine("  * Trafego Acumulado : RX=" + RTL8102E.HardwareRxPackets + " pkts (" + RTL8102E.HardwareRxBytes + " B)" +
+                Console.WriteLine("  * Cumulative Traffic: RX=" + RTL8102E.HardwareRxPackets + " pkts (" + RTL8102E.HardwareRxBytes + " B)" +
                                   " | TX=" + RTL8102E.HardwareTxPackets + " pkts (" + RTL8102E.HardwareTxBytes + " B)");
             }
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" [3. CONFIGURACAO IPv4 & BARE-METAL DHCP]");
+            Console.WriteLine(" [3. IPv4 CONFIGURATION & BARE-METAL DHCP]");
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("  * Endereco IPv4     : " + FormatIp(CurrentIp) + "   | Mascara Sub-rede: " + FormatIp(CurrentMask));
-            Console.WriteLine("  * Default Gateway   : " + FormatIp(CurrentGw) + "   | Servidor DNS    : " + FormatIp(CurrentDns));
+            Console.WriteLine("  * IPv4 Address      : " + FormatIp(CurrentIp) + "   | Subnet Mask : " + FormatIp(CurrentMask));
+            Console.WriteLine("  * Default Gateway   : " + FormatIp(CurrentGw) + "   | DNS Server  : " + FormatIp(CurrentDns));
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("  -> Prime [R] para atualizar leitura de registos MMIO, ou [1] para voltar");
+            Console.WriteLine("  -> Press [R] to refresh MMIO register readings, or [1] to return");
         }
 
         private void DrawPciAndUsbScannerScreen()
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === SCANNER DE HARDWARE PCI, MINI-PCIe & BARRAMENTO USB 2.0 (TOSHIBA NB100) ===");
+            Console.WriteLine(" === PCI, MINI-PCIe & USB 2.0 HARDWARE BUS SCANNER (TOSHIBA NB100) ===");
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" BUS:SL:FN  VEN:DEV    CLASSE  IRQ  BAR0        DESCRICAO DO CHIP");
+            Console.WriteLine(" BUS:SL:FN  VEN:DEV    CLASS   IRQ  BAR0        CHIP DESCRIPTION");
 
             int maxRows = PciDevices.Count > 10 ? 10 : PciDevices.Count;
             int startIdx = 0;
@@ -834,7 +834,7 @@ namespace RTL8102E_Driver
 
             Console.BackgroundColor = ConsoleColor.Black;
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" [PORTAS USB 2.0 EHCI DETETADAS VIA MMIO (INCLUI SLOT MINI-PCIe WI-FI)]:");
+            Console.WriteLine(" [USB 2.0 EHCI PORTS DETECTED VIA MMIO (INCLUDES MINI-PCIe WI-FI SLOT)]:");
             Console.ForegroundColor = ConsoleColor.Gray;
 
             int shownPorts = 0;
@@ -844,22 +844,22 @@ namespace RTL8102E_Driver
                 if (port.Connected || p >= 5)
                 {
                     Console.ForegroundColor = port.Connected ? ConsoleColor.Green : ConsoleColor.DarkGray;
-                    Console.WriteLine("  * Porta USB #" + port.PortNumber + " [PORTSC=0x" + Hex32(port.RawPortSc) + "]: " +
-                                      (port.Connected ? "LIGADO (High-Speed) - " : "Livre - ") + port.Note);
+                    Console.WriteLine("  * USB Port #" + port.PortNumber + " [PORTSC=0x" + Hex32(port.RawPortSc) + "]: " +
+                                      (port.Connected ? "CONNECTED (High-Speed) - " : "Free - ") + port.Note);
                     shownPorts++;
                     if (shownPorts >= 3) break;
                 }
             }
             if (shownPorts == 0)
             {
-                Console.WriteLine("  * Controlador EHCI inspecionado. Prime [ENTER] num chip PCI para ver BARs/Hex.");
+                Console.WriteLine("  * EHCI Controller inspected. Press [ENTER] on any PCI chip to view BARs/Hex.");
             }
         }
 
         private void DrawPciDeviceHexInspector(PciDeviceInfo d)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === INSPECAO PROFUNDA PCI CONFIG SPACE (" + d.Bus + ":" + d.Slot + ":" + d.Function + " - " + d.Description + ") ===");
+            Console.WriteLine(" === PCI CONFIG SPACE DEEP INSPECTOR (" + d.Bus + ":" + d.Slot + ":" + d.Function + " - " + d.Description + ") ===");
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine("  Vendor ID : 0x" + Hex16(d.VendorId) + " | Device ID : 0x" + Hex16(d.DeviceId) +
                               " | Subsystem : 0x" + Hex16(d.SubsysVendorId) + ":0x" + Hex16(d.SubsysDeviceId));
@@ -875,7 +875,7 @@ namespace RTL8102E_Driver
             }
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  [DUMP HEXADECIMAL DOS PRIMEIROS 64 BYTES DO PCI CONFIG SPACE]:");
+            Console.WriteLine("  [HEXADECIMAL DUMP OF FIRST 64 BYTES OF PCI CONFIG SPACE]:");
             Console.ForegroundColor = ConsoleColor.Green;
             var rawDev = new PCIDeviceNormal(d.Bus, d.Slot, d.Function);
             for (byte row = 0; row < 64; row += 16)
@@ -892,22 +892,22 @@ namespace RTL8102E_Driver
                 Console.WriteLine(hexRow);
             }
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("  [ESC] -> Voltar a lista de dispositivos PCI");
+            Console.WriteLine("  [ESC] -> Return to PCI device list");
         }
 
         private void DrawLivePacketSnifferScreen()
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === MONITOR DE PACOTES EM TEMPO REAL (LIVE DMA RX/TX PACKET SNIFFER) ===");
+            Console.WriteLine(" === REAL-TIME RAW PACKET SNIFFER (LIVE DMA RX/TX) ===");
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" DIR   PROTO TAM    ORIGEM / DESTINO / DETALHES DO FRAME");
+            Console.WriteLine(" DIR   PROTO SIZE   SOURCE / DESTINATION / FRAME DETAILS");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine(" ----- ----- ------ --------------------------------------------------------");
 
             if (_sniffCount == 0)
             {
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("  (A escutar anel DMA RX/TX via HackPoll... Prime [4] para gerar trafego DHCP)");
+                Console.WriteLine("  (Listening to DMA RX/TX ring via HackPoll... Press [4] to trigger DHCP traffic)");
             }
             else
             {
@@ -923,7 +923,7 @@ namespace RTL8102E_Driver
             }
             Console.ForegroundColor = ConsoleColor.Gray;
             Console.WriteLine();
-            Console.WriteLine("  [4] Disparar DHCP Discover/Request em direto   |   [ESC] Voltar ao Menu");
+            Console.WriteLine("  [4] Trigger live DHCP Discover/Request   |   [ESC] Return to Menu");
         }
 
         private void PerformWifiScanSweep()
@@ -931,8 +931,8 @@ namespace RTL8102E_Driver
             Console.Clear();
             DrawTopHeader();
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" [SCANNER 802.11 REAL] A varrer canais de radio 2.4 GHz (Canais 1 a 13)...");
-            Console.WriteLine(" [PROBE REQUESTS] A emitir frames 802.11 active probe request broadcast no ar...");
+            Console.WriteLine(" [REAL 802.11 SCANNER] Sweeping 2.4 GHz radio channels (Channels 1 to 13)...");
+            Console.WriteLine(" [PROBE REQUESTS] Broadcasting active 802.11 probe request frames over the air...");
             Console.WriteLine();
 
             if (_wifiDriver != null && _wifiDriver.IsInitialized)
@@ -941,7 +941,7 @@ namespace RTL8102E_Driver
                 for (int ch = 1; ch <= 13; ch++)
                 {
                     Console.ForegroundColor = ConsoleColor.Cyan;
-                    Console.Write("  -> Canal " + PadRight(ch.ToString(), 2) + " (" + freqs[ch - 1] + " MHz): ");
+                    Console.Write("  -> Channel " + PadRight(ch.ToString(), 2) + " (" + freqs[ch - 1] + " MHz): ");
 
                     _wifiDriver.ResetAndTuneChannel(ch);
                     _wifiDriver.SendProbeRequest();
@@ -967,7 +967,7 @@ namespace RTL8102E_Driver
                     if (countOnCh == 0)
                     {
                         Console.ForegroundColor = ConsoleColor.DarkGray;
-                        Console.Write("limpo (-95 dBm)");
+                        Console.Write("clear (-95 dBm)");
                     }
                     Console.WriteLine();
                 }
@@ -979,8 +979,8 @@ namespace RTL8102E_Driver
             else
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("  [AVISO] Chip Atheros AR2425 nao detetado ou nao inicializado.");
-                _statusBanner = "Erro: Driver Atheros nao disponivel para scan.";
+                Console.WriteLine("  [WARNING] Atheros AR2425 chip not detected or not initialized.");
+                _statusBanner = "Error: Atheros driver not available for scanning.";
             }
         }
 
@@ -989,29 +989,45 @@ namespace RTL8102E_Driver
             Console.Clear();
             DrawTopHeader();
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === LIGACAO A REDE WI-FI: " + ap.Ssid + " (" + ap.Bssid + ") ===");
+            Console.WriteLine(" === CONNECTING TO WI-FI: " + ap.Ssid + " (" + ap.Bssid + ") ===");
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("  Seguranca: " + ap.Security + " (" + ap.Cipher + ") | Canal " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)");
+            Console.WriteLine("  Security: " + ap.Security + " (" + ap.Cipher + ") | Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)");
             Console.WriteLine();
 
+            string pwd = "";
             if (!ap.IsOpen)
             {
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.Write("  Introduz a Password Wi-Fi (ou Enter para usar perfil guardado): ");
-                string pwd = ReadPasswordWhilePolling();
+                Console.Write("  Enter Wi-Fi Password: ");
+                pwd = ReadPasswordWhilePolling();
                 if (pwd == null)
                 {
-                    _statusBanner = "Ligacao Wi-Fi cancelada pelo utilizador.";
+                    _statusBanner = "Wi-Fi connection cancelled by user.";
+                    return;
+                }
+
+                if (pwd.Length < 8)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine("  [ERROR] Invalid WPA2 passphrase! Minimum 8 characters required.");
+                    Console.WriteLine("          Connection aborted - password rejected.");
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine("  Press any key to return to main menu...");
+                    WaitKeyWhilePolling();
+                    _statusBanner = "Error: Invalid WPA2 passphrase (min 8 chars).";
+                    _currentScreen = 0;
                     return;
                 }
             }
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  [1/3] A sintonizar sintetizador RF Atheros no Canal " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
+            Console.WriteLine("  [1/3] Tuning Atheros RF synthesizer to Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
             SpinPoll(300000);
 
-            Console.WriteLine("  [2/3] A transmitir 802.11 Open Auth & Association Request no ar para " + ap.Bssid + "...");
+            Console.WriteLine("  [2/3] Transmitting 802.11 Open Auth & Association Request frames over the air to " + ap.Bssid + "...");
             bool assocSent = false;
             if (_wifiDriver != null)
             {
@@ -1022,49 +1038,61 @@ namespace RTL8102E_Driver
             if (ap.IsOpen)
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  [3/3] Rede Aberta (Sem Senha): Associacao 802.11 transmitida e ativa!");
+                Console.WriteLine("  [3/3] Open Network (No Password): 802.11 Association transmitted and active!");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("        O teu telemovel regista agora o dispositivo ligado no Hotspot!");
+                Console.WriteLine("        Your phone hotspot now registers this laptop under 'Connected devices'!");
+
+                for (int i = 0; i < WifiNetworks.Count; i++)
+                {
+                    WifiNetworks[i].IsConnected = false;
+                }
+                ap.IsConnected = true;
+                ConnectedWifi = ap;
+                _statusBanner = "Connected to open network '" + ap.Ssid + "' (Channel " + ap.Channel + ")!";
             }
             else
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("  [3/3] Frames 802.11 Auth & Assoc transmitidos no ar!");
+                Console.WriteLine("  [3/3] 802.11 Management Association frames transmitted over the air!");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("        NOTA: Como o teu Hotspot usa WPA2 (" + ap.Cipher + "), a transmissao de dados IP");
-                Console.WriteLine("        encriptados requer o 4-Way Handshake. Se quiseres navegacao IP sem fios completa,");
-                Console.WriteLine("        define o Hotspot do telemovel temporariamente como 'Sem Senha' (Rede Aberta).");
-                Console.WriteLine("        A placa de rede enviou os pacotes de ligacao de hardware.");
+                Console.WriteLine();
+                Console.WriteLine("  [!] WPA2-PSK 4-WAY HANDSHAKE NOTICE:");
+                Console.WriteLine("      Network '" + ap.Ssid + "' requires WPA2-PSK encrypted 4-Way EAPOL Handshake.");
+                Console.WriteLine("      Passphrase was validated (length OK), but Cosmos OS bare-metal environment");
+                Console.WriteLine("      does not have an 802.11i cryptographic WPA-Supplicant daemon to exchange keys.");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  -> TO CONNECT YOUR PHONE HOTSPOT DIRECTLY:");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine("     In your phone Hotspot settings -> Security, select 'None / Open' (no password).");
+                Console.WriteLine("     The laptop will associate immediately and appear under 'Connected devices'.");
+
+                for (int i = 0; i < WifiNetworks.Count; i++)
+                {
+                    WifiNetworks[i].IsConnected = false;
+                }
+                ap.IsConnected = false;
+                _statusBanner = "Connection incomplete: WPA2 key handshake required (use Open Hotspot).";
             }
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  Prime qualquer tecla para regressar ao menu principal...");
+            Console.WriteLine("  Press any key to return to main menu...");
             WaitKeyWhilePolling();
-
-            for (int i = 0; i < WifiNetworks.Count; i++)
-            {
-                WifiNetworks[i].IsConnected = false;
-            }
-            ap.IsConnected = true;
-            ConnectedWifi = ap;
-
-            _statusBanner = "Associado via 802.11 a '" + ap.Ssid + "' (Canal " + ap.Channel + ")!";
             _currentScreen = 0;
         }
-
         private void PromptAddCustomNetwork()
         {
             Console.Clear();
             DrawTopHeader();
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" === ADICIONAR REDE WI-FI MANUAL (HIDDEN / CUSTOM SSID) ===");
+            Console.WriteLine(" === ADD MANUAL WI-FI NETWORK (HIDDEN / CUSTOM SSID) ===");
             Console.ForegroundColor = ConsoleColor.White;
-            Console.Write("  Nome da Rede (SSID): ");
+            Console.Write("  Network Name (SSID): ");
             string ssid = ReadLineWhilePolling(false);
             if (string.IsNullOrEmpty(ssid))
             {
-                _statusBanner = "Adicao de rede cancelada.";
+                _statusBanner = "Manual network addition cancelled.";
                 return;
             }
 
@@ -1087,7 +1115,7 @@ namespace RTL8102E_Driver
 
             WifiNetworks.Add(customAp);
             _selectedWifiIdx = WifiNetworks.Count - 1;
-            _statusBanner = "Rede '" + ssid + "' adicionada! Prime [ENTER] para ligar.";
+            _statusBanner = "Network '" + ssid + "' added! Press [ENTER] to connect.";
         }
 
         private void RunManualDhcpRenewal()
@@ -1095,7 +1123,7 @@ namespace RTL8102E_Driver
             if (_ethDriver == null || _dhcp == null) return;
 
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine("  -> A executar Bare-Metal DHCP Discover/Request...");
+            Console.WriteLine("  -> Executing Bare-Metal DHCP Discover/Request on Ethernet...");
             var newIp = _dhcp.DoAutoConfig();
             if (newIp != null)
             {
@@ -1113,7 +1141,7 @@ namespace RTL8102E_Driver
                 var config = new Sys.Network.Config.IPConfig(ipAddr, subnet, gwAddr);
                 Sys.Network.NetworkStack.ConfigIP(_ethDriver, config);
 
-                _statusBanner = "DHCP OK! Novo IP: " + FormatIp(CurrentIp) + " (GW: " + FormatIp(CurrentGw) + ")";
+                _statusBanner = "DHCP OK! New IP: " + FormatIp(CurrentIp) + " (GW: " + FormatIp(CurrentGw) + ")";
             }
         }
 

@@ -743,7 +743,7 @@ namespace RTL8102E_Driver
 
         public volatile bool LastAssocSuccess = false;
 
-        public void SendRawFrame(byte[] frame)
+        public void SendRawFrame(byte[] frame, bool isUnicast)
         {
             if (!IsInitialized || frame == null || frame.Length == 0) return;
 
@@ -761,11 +761,19 @@ namespace RTL8102E_Driver
 
             descBlock.DWords[0] = 0;     // ds_link = 0
             descBlock.DWords[4] = bAddr; // ds_data
+            
+            // Frame length in tx_ctl0 includes 4 bytes of hardware-generated FCS
+            uint frameLenWithFcs = (uint)((frame.Length + 4) & 0x0FFF);
             // tx_ctl0: frame_len | xmit_power(60) | clrdmask(0x01000000)
-            descBlock.DWords[8] = (uint)(frame.Length & 0x0FFF) | (60u << 16) | 0x01000000u;
-            // tx_ctl1: buf_len | noack(0x01000000)
-            descBlock.DWords[12] = (uint)(frame.Length & 0x0FFF) | 0x01000000u;
-            descBlock.DWords[16] = 0;    // tx_ctl2: duration
+            descBlock.DWords[8] = frameLenWithFcs | (60u << 16) | 0x01000000u;
+            
+            // tx_ctl1: buf_len | (isUnicast ? 0 : NOACK 0x01000000)
+            uint noAckFlag = isUnicast ? 0u : 0x01000000u;
+            descBlock.DWords[12] = (uint)(frame.Length & 0x0FFF) | noAckFlag;
+            
+            // tx_ctl2: xmit_tries0 = 4 hardware retries (bits 16-19: 0x00040000)
+            descBlock.DWords[16] = 0x00040000u;
+            
             // tx_ctl3: xmit_rate0 = 0x1B (1 Mbps CCK for 802.11 management frames)
             descBlock.DWords[20] = 0x1B;
             descBlock.DWords[24] = 0;    // tx_stat0
@@ -797,7 +805,7 @@ namespace RTL8102E_Driver
                 0x01, 0x08, 0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24 // Supported Rates
             };
 
-            SendRawFrame(frame);
+            SendRawFrame(frame, false);
         }
 
         public void SendAuthFrame(byte[] bssid)
@@ -823,7 +831,7 @@ namespace RTL8102E_Driver
             frame[26] = 0x01; frame[27] = 0x00; // Sequence 1
             frame[28] = 0x00; frame[29] = 0x00; // Status 0 (Success)
 
-            SendRawFrame(frame);
+            SendRawFrame(frame, true);
         }
 
         public void SendAssocRequestFrame(byte[] bssid, string ssid)
@@ -872,7 +880,7 @@ namespace RTL8102E_Driver
             frame[pos++] = 0x04;
             frame[pos++] = 0x30; frame[pos++] = 0x48; frame[pos++] = 0x60; frame[pos++] = 0x6C;
 
-            SendRawFrame(frame);
+            SendRawFrame(frame, true);
         }
 
         public bool AssociateWithAp(string bssidStr, string ssid, int channel)
