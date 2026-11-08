@@ -609,13 +609,13 @@ namespace RTL8102E_Driver
 
         private byte[] WrapIn80211DataFrame(byte[] eapolPayload)
         {
-            // 802.11 QoS Data Frame:
-            // 24 bytes MAC header + 2 bytes QoS Control + 8 bytes LLC/SNAP + EAPOL
-            int totalLen = 26 + 8 + eapolPayload.Length;
+            // Standard 802.11 Data Frame (compatible with all APs & phone hotspots):
+            // 24 bytes MAC header + 8 bytes LLC/SNAP + EAPOL
+            int totalLen = 24 + 8 + eapolPayload.Length;
             byte[] frame = new byte[totalLen];
 
-            // Frame Control: QoS Data (0x88), ToDS=1 (0x01)
-            frame[0] = 0x88;
+            // Frame Control: Data (0x08), ToDS=1 (0x01)
+            frame[0] = 0x08;
             frame[1] = 0x01;
             frame[2] = 0x00; // Duration
             frame[3] = 0x00;
@@ -628,26 +628,22 @@ namespace RTL8102E_Driver
             Array.Copy(ApBssid, 0, frame, 16, 6);
 
             // Sequence Control
-            ushort seq = SequenceNumber++;
-            frame[22] = (byte)((seq << 4) & 0xFF);
-            frame[23] = (byte)((seq >> 4) & 0xFF);
-
-            // QoS Control (TID 0)
-            frame[24] = 0x00;
-            frame[25] = 0x00;
+            ushort seq = (ushort)((SequenceNumber++ & 0x0FFF) << 4);
+            frame[22] = (byte)(seq & 0xFF);
+            frame[23] = (byte)(seq >> 8);
 
             // LLC / SNAP Header (802.1X EtherType 0x888E)
-            frame[26] = 0xAA;
-            frame[27] = 0xAA;
-            frame[28] = 0x03;
+            frame[24] = 0xAA;
+            frame[25] = 0xAA;
+            frame[26] = 0x03;
+            frame[27] = 0x00;
+            frame[28] = 0x00;
             frame[29] = 0x00;
-            frame[30] = 0x00;
-            frame[31] = 0x00;
-            frame[32] = 0x88;
-            frame[33] = 0x8E;
+            frame[30] = 0x88;
+            frame[31] = 0x8E;
 
             // EAPOL Payload
-            Array.Copy(eapolPayload, 0, frame, 34, eapolPayload.Length);
+            Array.Copy(eapolPayload, 0, frame, 32, eapolPayload.Length);
 
             return frame;
         }

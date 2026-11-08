@@ -1416,13 +1416,13 @@ namespace Cosmos.HAL
 
         private byte[] WrapIn80211DataFrame(byte[] eapolPayload)
         {
-            // 802.11 QoS Data Frame:
-            // 24 bytes MAC header + 2 bytes QoS Control + 8 bytes LLC/SNAP + EAPOL
-            int totalLen = 26 + 8 + eapolPayload.Length;
+            // Standard 802.11 Data Frame (compatible with all APs & phone hotspots):
+            // 24 bytes MAC header + 8 bytes LLC/SNAP + EAPOL
+            int totalLen = 24 + 8 + eapolPayload.Length;
             byte[] frame = new byte[totalLen];
 
-            // Frame Control: QoS Data (0x88), ToDS=1 (0x01)
-            frame[0] = 0x88;
+            // Frame Control: Data (0x08), ToDS=1 (0x01)
+            frame[0] = 0x08;
             frame[1] = 0x01;
             frame[2] = 0x00; // Duration
             frame[3] = 0x00;
@@ -1435,26 +1435,22 @@ namespace Cosmos.HAL
             Array.Copy(ApBssid, 0, frame, 16, 6);
 
             // Sequence Control
-            ushort seq = SequenceNumber++;
-            frame[22] = (byte)((seq << 4) & 0xFF);
-            frame[23] = (byte)((seq >> 4) & 0xFF);
-
-            // QoS Control (TID 0)
-            frame[24] = 0x00;
-            frame[25] = 0x00;
+            ushort seq = (ushort)((SequenceNumber++ & 0x0FFF) << 4);
+            frame[22] = (byte)(seq & 0xFF);
+            frame[23] = (byte)(seq >> 8);
 
             // LLC / SNAP Header (802.1X EtherType 0x888E)
-            frame[26] = 0xAA;
-            frame[27] = 0xAA;
-            frame[28] = 0x03;
+            frame[24] = 0xAA;
+            frame[25] = 0xAA;
+            frame[26] = 0x03;
+            frame[27] = 0x00;
+            frame[28] = 0x00;
             frame[29] = 0x00;
-            frame[30] = 0x00;
-            frame[31] = 0x00;
-            frame[32] = 0x88;
-            frame[33] = 0x8E;
+            frame[30] = 0x88;
+            frame[31] = 0x8E;
 
             // EAPOL Payload
-            Array.Copy(eapolPayload, 0, frame, 34, eapolPayload.Length);
+            Array.Copy(eapolPayload, 0, frame, 32, eapolPayload.Length);
 
             return frame;
         }
@@ -2231,6 +2227,34 @@ namespace Cosmos.HAL
             }
             else if ((frameControl & 0x0C) == 0x08) // Data or QoS Data frame
             {
+                // 1. Destination Address (DA) at bytes 4..9 MUST match our station MAC!
+                bool forUs = true;
+                for (int m = 0; m < 6; m++)
+                {
+                    if (pkt[4 + m] != MacAddress[m]) { forUs = false; break; }
+                }
+                if (!forUs) return; // Drop over-the-air traffic destined to other clients!
+
+                // 2. Transmitter/BSSID at bytes 10..15 MUST match the target AP!
+                if (Wpa2Engine != null && Wpa2Engine.ApBssid != null)
+                {
+                    bool fromAp = true;
+                    for (int m = 0; m < 6; m++)
+                    {
+                        if (pkt[10 + m] != Wpa2Engine.ApBssid[m]) { fromAp = false; break; }
+                    }
+                    if (!fromAp) return; // Drop packets from unrelated APs!
+                }
+
+                // 3. EAPOL MUST only be processed when in an active EAPOL handshake state!
+                if (Wpa2Engine == null ||
+                    (Wpa2Engine.State != Wpa2HandshakeState.WaitingMsg1 &&
+                     Wpa2Engine.State != Wpa2HandshakeState.Msg2Sent &&
+                     Wpa2Engine.State != Wpa2HandshakeState.WaitingMsg3))
+                {
+                    return; // Ignore data frames before 802.11 Association is confirmed!
+                }
+
                 // Scan for 802.1X EAPOL (LLC/SNAP: AA AA 03 00 00 00 88 8E)
                 int snapOffset = -1;
                 for (int s = 20; s <= 36 && s + 8 <= pkt.Length; s++)
@@ -2270,6 +2294,7 @@ namespace Cosmos.HAL
             }
         }
 
+        private ushort _mgmtSeq = 1;
         public volatile bool LastAuthSuccess = false;
         public volatile bool LastAssocSuccess = false;
         public volatile ushort LastAssocAid = 1;
@@ -2407,7 +2432,9 @@ namespace Cosmos.HAL
             frame[16] = bssid[0]; frame[17] = bssid[1]; frame[18] = bssid[2];
             frame[19] = bssid[3]; frame[20] = bssid[4]; frame[21] = bssid[5];
             // Seq Ctrl
-            frame[22] = 0x00; frame[23] = 0x00;
+            ushort seqCtrl = (ushort)((_mgmtSeq++ & 0x0FFF) << 4);
+            frame[22] = (byte)(seqCtrl & 0xFF);
+            frame[23] = (byte)(seqCtrl >> 8);
             // Auth Body
             frame[24] = 0x00; frame[25] = 0x00; // Open System (0)
             frame[26] = 0x01; frame[27] = 0x00; // Sequence 1
@@ -2439,7 +2466,9 @@ namespace Cosmos.HAL
             frame[16] = bssid[0]; frame[17] = bssid[1]; frame[18] = bssid[2];
             frame[19] = bssid[3]; frame[20] = bssid[4]; frame[21] = bssid[5];
             // Seq Ctrl
-            frame[22] = 0x10; frame[23] = 0x00;
+            ushort seqCtrl = (ushort)((_mgmtSeq++ & 0x0FFF) << 4);
+            frame[22] = (byte)(seqCtrl & 0xFF);
+            frame[23] = (byte)(seqCtrl >> 8);
 
             // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time; + 0x0010 Privacy if WPA2)
             frame[24] = isWpa2 ? (byte)0x31 : (byte)0x21;
@@ -2543,11 +2572,11 @@ namespace Cosmos.HAL
 
             // Stage 1: Send 802.11 Open Authentication with retries
             Console.WriteLine("  [2/4] Transmitting 802.11 Open Auth to " + bssidStr + "...");
-            for (int authTry = 1; authTry <= 4; authTry++)
+            for (int authTry = 1; authTry <= 5; authTry++)
             {
                 SendAuthFrame(bssid);
 
-                for (int poll = 0; poll < 100; poll++)
+                for (int poll = 0; poll < 120; poll++)
                 {
                     PollRx();
                     if (LastAuthSuccess) break;
@@ -2563,14 +2592,20 @@ namespace Cosmos.HAL
                 Console.WriteLine("        Open Authentication Accepted by AP!");
                 Console.ForegroundColor = ConsoleColor.Cyan;
             }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine("        [INFO] Open Auth sent; syncing Association exchange...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+            }
 
             // Stage 2: Send 802.11 Association Request with WPA2 RSN IE with retries
             Console.WriteLine("  [3/4] Transmitting 802.11 Association Request with RSN IE...");
-            for (int assocTry = 1; assocTry <= 4; assocTry++)
+            for (int assocTry = 1; assocTry <= 5; assocTry++)
             {
                 SendAssocRequestFrame(bssid, ssid, true);
 
-                for (int poll = 0; poll < 150; poll++)
+                for (int poll = 0; poll < 180; poll++)
                 {
                     PollRx();
                     if (LastAssocSuccess) break;
@@ -2588,7 +2623,14 @@ namespace Cosmos.HAL
                 Console.WriteLine("        Associated with AP! (Assigned AID: " + LastAssocAid + ")");
                 Console.ForegroundColor = ConsoleColor.Cyan;
             }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.DarkYellow;
+                Console.WriteLine("        [INFO] Association Request registered; opening EAPOL window...");
+                Console.ForegroundColor = ConsoleColor.Cyan;
+            }
 
+            // Transition state machine to listen for EAPOL Message 1
             Wpa2Engine.State = Wpa2HandshakeState.WaitingMsg1;
             return true;
         }
