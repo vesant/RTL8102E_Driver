@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Cosmos.Core;
 using Cosmos.HAL;
 
@@ -489,7 +490,6 @@ namespace RTL8102E_Driver
         }
     }
 
-
     public class CustomDHCP
     {
         private RTL8102E _driver;
@@ -794,6 +794,646 @@ namespace RTL8102E_Driver
         }
     }
 
+    public enum Wpa2HandshakeState
+    {
+        Idle,
+        ConnectingAuthAssoc,
+        WaitingMsg1,
+        Msg2Sent,
+        WaitingMsg3,
+        Completed,
+        Failed
+    }
+
+    /// <summary>
+    /// Pure C# RFC 3174 SHA-1 implementation without any System.Security.Cryptography dependencies.
+    /// Perfectly compatible with Cosmos OS / IL2CPU bare-metal runtime.
+    /// </summary>
+    public class PureSha1
+    {
+        private uint[] _h = new uint[5];
+        private byte[] _buffer = new byte[64];
+        private int _bufferLength;
+        private ulong _totalBytes;
+        private uint[] _w = new uint[80];
+
+        public PureSha1()
+        {
+            Reset();
+        }
+
+        public void Reset()
+        {
+            _h[0] = 0x67452301u;
+            _h[1] = 0xEFCDAB89u;
+            _h[2] = 0x98BADCFEu;
+            _h[3] = 0x10325476u;
+            _h[4] = 0xC3D2E1F0u;
+            _bufferLength = 0;
+            _totalBytes = 0;
+        }
+
+        public void Update(byte[] data, int offset, int count)
+        {
+            if (data == null || count <= 0) return;
+            _totalBytes += (ulong)count;
+
+            int i = 0;
+            if (_bufferLength > 0)
+            {
+                int toCopy = Math.Min(64 - _bufferLength, count);
+                Array.Copy(data, offset, _buffer, _bufferLength, toCopy);
+                _bufferLength += toCopy;
+                i += toCopy;
+
+                if (_bufferLength == 64)
+                {
+                    ProcessBlock(_buffer, 0);
+                    _bufferLength = 0;
+                }
+            }
+
+            while (i + 64 <= count)
+            {
+                ProcessBlock(data, offset + i);
+                i += 64;
+            }
+
+            if (i < count)
+            {
+                int remaining = count - i;
+                Array.Copy(data, offset + i, _buffer, 0, remaining);
+                _bufferLength = remaining;
+            }
+        }
+
+        public void Final(byte[] output, int outOffset)
+        {
+            ulong totalBits = _totalBytes * 8;
+
+            _buffer[_bufferLength++] = 0x80;
+
+            if (_bufferLength > 56)
+            {
+                while (_bufferLength < 64) _buffer[_bufferLength++] = 0;
+                ProcessBlock(_buffer, 0);
+                _bufferLength = 0;
+            }
+
+            while (_bufferLength < 56) _buffer[_bufferLength++] = 0;
+
+            _buffer[56] = (byte)(totalBits >> 56);
+            _buffer[57] = (byte)(totalBits >> 48);
+            _buffer[58] = (byte)(totalBits >> 40);
+            _buffer[59] = (byte)(totalBits >> 32);
+            _buffer[60] = (byte)(totalBits >> 24);
+            _buffer[61] = (byte)(totalBits >> 16);
+            _buffer[62] = (byte)(totalBits >> 8);
+            _buffer[63] = (byte)(totalBits);
+
+            ProcessBlock(_buffer, 0);
+
+            for (int i = 0; i < 5; i++)
+            {
+                output[outOffset + i * 4] = (byte)(_h[i] >> 24);
+                output[outOffset + i * 4 + 1] = (byte)(_h[i] >> 16);
+                output[outOffset + i * 4 + 2] = (byte)(_h[i] >> 8);
+                output[outOffset + i * 4 + 3] = (byte)(_h[i]);
+            }
+        }
+
+        private void ProcessBlock(byte[] block, int offset)
+        {
+            for (int t = 0; t < 16; t++)
+            {
+                int idx = offset + t * 4;
+                _w[t] = ((uint)block[idx] << 24) |
+                        ((uint)block[idx + 1] << 16) |
+                        ((uint)block[idx + 2] << 8) |
+                        (uint)block[idx + 3];
+            }
+
+            for (int t = 16; t < 80; t++)
+            {
+                uint temp = _w[t - 3] ^ _w[t - 8] ^ _w[t - 14] ^ _w[t - 16];
+                _w[t] = (temp << 1) | (temp >> 31);
+            }
+
+            uint a = _h[0];
+            uint b = _h[1];
+            uint c = _h[2];
+            uint d = _h[3];
+            uint e = _h[4];
+
+            for (int t = 0; t < 80; t++)
+            {
+                uint f, k;
+                if (t < 20)
+                {
+                    f = (b & c) | ((~b) & d);
+                    k = 0x5A827999u;
+                }
+                else if (t < 40)
+                {
+                    f = b ^ c ^ d;
+                    k = 0x6ED9EBA1u;
+                }
+                else if (t < 60)
+                {
+                    f = (b & c) | (b & d) | (c & d);
+                    k = 0x8F1BBCDCu;
+                }
+                else
+                {
+                    f = b ^ c ^ d;
+                    k = 0xCA62C1D6u;
+                }
+
+                uint temp = ((a << 5) | (a >> 27)) + f + e + k + _w[t];
+                e = d;
+                d = c;
+                c = (b << 30) | (b >> 2);
+                b = a;
+                a = temp;
+            }
+
+            _h[0] += a;
+            _h[1] += b;
+            _h[2] += c;
+            _h[3] += d;
+            _h[4] += e;
+        }
+
+        public static byte[] Hash(byte[] data)
+        {
+            var sha = new PureSha1();
+            sha.Update(data, 0, data != null ? data.Length : 0);
+            byte[] res = new byte[20];
+            sha.Final(res, 0);
+            return res;
+        }
+    }
+
+    /// <summary>
+    /// Pure C# RFC 2104 HMAC-SHA1 implementation with zero heap allocations during iterations.
+    /// </summary>
+    public class PureHmacSha1
+    {
+        private PureSha1 _sha = new PureSha1();
+        private byte[] _keyPad = new byte[64];
+        private byte[] _innerHash = new byte[20];
+        private byte[] _ipad = new byte[64];
+        private byte[] _opad = new byte[64];
+
+        public void ComputeHmac(byte[] key, byte[] data, int dataOffset, int dataLen, byte[] output, int outOffset)
+        {
+            Array.Clear(_keyPad, 0, 64);
+            if (key != null)
+            {
+                if (key.Length > 64)
+                {
+                    byte[] kh = PureSha1.Hash(key);
+                    Array.Copy(kh, 0, _keyPad, 0, 20);
+                }
+                else
+                {
+                    Array.Copy(key, 0, _keyPad, 0, key.Length);
+                }
+            }
+
+            for (int i = 0; i < 64; i++)
+            {
+                _ipad[i] = (byte)(_keyPad[i] ^ 0x36);
+                _opad[i] = (byte)(_keyPad[i] ^ 0x5C);
+            }
+
+            _sha.Reset();
+            _sha.Update(_ipad, 0, 64);
+            if (data != null && dataLen > 0)
+            {
+                _sha.Update(data, dataOffset, dataLen);
+            }
+            _sha.Final(_innerHash, 0);
+
+            _sha.Reset();
+            _sha.Update(_opad, 0, 64);
+            _sha.Update(_innerHash, 0, 20);
+            _sha.Final(output, outOffset);
+        }
+
+        public static byte[] Compute(byte[] key, byte[] data)
+        {
+            var hmac = new PureHmacSha1();
+            byte[] res = new byte[20];
+            hmac.ComputeHmac(key, data, 0, data != null ? data.Length : 0, res, 0);
+            return res;
+        }
+    }
+
+    /// <summary>
+    /// Pure C# RFC 2898 / PKCS#5 v2.0 PBKDF2-HMAC-SHA1 for deriving 32-byte PMK.
+    /// </summary>
+    public static class PurePbkdf2
+    {
+        public static byte[] DerivePmk(string passphrase, string ssid)
+        {
+            byte[] passBytes = Encoding.UTF8.GetBytes(passphrase ?? "");
+            byte[] ssidBytes = Encoding.UTF8.GetBytes(ssid ?? "");
+            return DeriveKey(passBytes, ssidBytes, 4096, 32);
+        }
+
+        public static byte[] DeriveKey(byte[] password, byte[] salt, int iterations, int keyLen)
+        {
+            byte[] output = new byte[keyLen];
+            var hmac = new PureHmacSha1();
+            byte[] saltPlusBlock = new byte[salt.Length + 4];
+            Array.Copy(salt, 0, saltPlusBlock, 0, salt.Length);
+
+            byte[] uBlock = new byte[20];
+            byte[] uPrev = new byte[20];
+            byte[] uCur = new byte[20];
+
+            int totalBlocks = (keyLen + 19) / 20;
+            int outOffset = 0;
+
+            for (int block = 1; block <= totalBlocks; block++)
+            {
+                saltPlusBlock[salt.Length] = (byte)(block >> 24);
+                saltPlusBlock[salt.Length + 1] = (byte)(block >> 16);
+                saltPlusBlock[salt.Length + 2] = (byte)(block >> 8);
+                saltPlusBlock[salt.Length + 3] = (byte)block;
+
+                hmac.ComputeHmac(password, saltPlusBlock, 0, saltPlusBlock.Length, uPrev, 0);
+                Array.Copy(uPrev, 0, uBlock, 0, 20);
+
+                for (int iter = 2; iter <= iterations; iter++)
+                {
+                    hmac.ComputeHmac(password, uPrev, 0, 20, uCur, 0);
+                    for (int x = 0; x < 20; x++)
+                    {
+                        uBlock[x] ^= uCur[x];
+                        uPrev[x] = uCur[x];
+                    }
+                }
+
+                int toCopy = Math.Min(20, keyLen - outOffset);
+                Array.Copy(uBlock, 0, output, outOffset, toCopy);
+                outOffset += toCopy;
+            }
+
+            return output;
+        }
+    }
+
+    /// <summary>
+    /// Pure C# IEEE 802.11i-2004 PRF-512 Pseudo-Random Function for PTK derivation.
+    /// </summary>
+    public static class PurePrf512
+    {
+        public static byte[] DerivePtk(byte[] pmk, byte[] aa, byte[] spa, byte[] anonce, byte[] snonce)
+        {
+            byte[] label = Encoding.ASCII.GetBytes("Pairwise key expansion");
+
+            // Lexicographical order: Min(AA, SPA) || Max(AA, SPA)
+            byte[] minMac = LessThan(aa, spa) ? aa : spa;
+            byte[] maxMac = LessThan(aa, spa) ? spa : aa;
+
+            // Lexicographical order: Min(ANonce, SNonce) || Max(ANonce, SNonce)
+            byte[] minNonce = LessThan(anonce, snonce) ? anonce : snonce;
+            byte[] maxNonce = LessThan(anonce, snonce) ? snonce : anonce;
+
+            byte[] dataB = new byte[12 + 64];
+            Array.Copy(minMac, 0, dataB, 0, 6);
+            Array.Copy(maxMac, 0, dataB, 6, 6);
+            Array.Copy(minNonce, 0, dataB, 12, 32);
+            Array.Copy(maxNonce, 0, dataB, 44, 32);
+
+            byte[] input = new byte[label.Length + 1 + dataB.Length + 1];
+            Array.Copy(label, 0, input, 0, label.Length);
+            input[label.Length] = 0x00;
+            Array.Copy(dataB, 0, input, label.Length + 1, dataB.Length);
+
+            byte[] ptk = new byte[64];
+            byte[] hmacOut = new byte[20];
+            var hmac = new PureHmacSha1();
+
+            for (byte i = 0; i < 4; i++)
+            {
+                input[input.Length - 1] = i;
+                hmac.ComputeHmac(pmk, input, 0, input.Length, hmacOut, 0);
+                int copyLen = Math.Min(20, 64 - i * 20);
+                Array.Copy(hmacOut, 0, ptk, i * 20, copyLen);
+            }
+
+            return ptk;
+        }
+
+        private static bool LessThan(byte[] a, byte[] b)
+        {
+            int len = Math.Min(a.Length, b.Length);
+            for (int i = 0; i < len; i++)
+            {
+                if (a[i] < b[i]) return true;
+                if (a[i] > b[i]) return false;
+            }
+            return a.Length < b.Length;
+        }
+    }
+
+    /// <summary>
+    /// Pure bare-metal IEEE 802.11i WPA2-PSK 4-Way Handshake Engine.
+    /// Authenticates with modern WPA2-PSK access points and phone hotspots.
+    /// Derives PMK, PTK, KCK, KEK, and Temporal Key (TK), sends valid EAPOL Messages 2 & 4,
+    /// verifies AP Message 3 MIC, and rejects incorrect passwords.
+    /// </summary>
+    public class Wpa2HandshakeEngine
+    {
+        public Wpa2HandshakeState State { get; set; } = Wpa2HandshakeState.Idle;
+        public string FailureReason { get; set; } = "";
+
+        public byte[] ApBssid { get; private set; } = new byte[6];
+        public byte[] StationMac { get; private set; } = new byte[6];
+        public string Ssid { get; private set; } = "";
+        public string Passphrase { get; private set; } = "";
+        public int Channel { get; private set; } = 1;
+
+        public byte[] Pmk { get; private set; } = new byte[32];
+        public byte[] Ptk { get; private set; } = new byte[64];
+        public byte[] Kck { get; private set; } = new byte[16];
+        public byte[] Kek { get; private set; } = new byte[16];
+        public byte[] Tk { get; private set; } = new byte[16];
+
+        public byte[] ANonce { get; private set; } = new byte[32];
+        public byte[] SNonce { get; private set; } = new byte[32];
+        public byte[] Msg1ReplayCounter { get; private set; } = new byte[8];
+        public byte[] Msg3ReplayCounter { get; private set; } = new byte[8];
+
+        public ushort SequenceNumber = 1;
+
+        // Station RSN Information Element (Tag 48, Length 20)
+        private static readonly byte[] StationRsnIe = new byte[] {
+            0x30, 0x14,
+            0x01, 0x00,                         // Version: 1
+            0x00, 0x0F, 0xAC, 0x04,             // Group Cipher: AES-CCMP
+            0x01, 0x00, 0x00, 0x0F, 0xAC, 0x04, // Pairwise Cipher: 1 AES-CCMP
+            0x01, 0x00, 0x00, 0x0F, 0xAC, 0x02, // AKM Suite: 1 PSK
+            0x00, 0x00                          // RSN Capabilities
+        };
+
+        public void Initialize(byte[] apBssid, byte[] stationMac, string ssid, string passphrase, int channel)
+        {
+            Array.Copy(apBssid, 0, ApBssid, 0, 6);
+            Array.Copy(stationMac, 0, StationMac, 0, 6);
+            Ssid = ssid ?? "";
+            Passphrase = passphrase ?? "";
+            Channel = channel;
+            State = Wpa2HandshakeState.ConnectingAuthAssoc;
+            FailureReason = "";
+
+            // Derive 32-byte PMK using PBKDF2 (4096 iterations)
+            Pmk = PurePbkdf2.DerivePmk(Passphrase, Ssid);
+        }
+
+        public static byte[] GenerateSNonce(byte[] stationMac, byte[] apBssid, uint tsfL, uint tsfU)
+        {
+            byte[] entropy = new byte[36];
+            for (int i = 0; i < 6; i++)
+            {
+                entropy[i] = stationMac != null && i < stationMac.Length ? stationMac[i] : (byte)0x11;
+                entropy[6 + i] = apBssid != null && i < apBssid.Length ? apBssid[i] : (byte)0x22;
+            }
+            entropy[12] = (byte)(tsfL);
+            entropy[13] = (byte)(tsfL >> 8);
+            entropy[14] = (byte)(tsfL >> 16);
+            entropy[15] = (byte)(tsfL >> 24);
+            entropy[16] = (byte)(tsfU);
+            entropy[17] = (byte)(tsfU >> 8);
+            entropy[18] = (byte)(tsfU >> 16);
+            entropy[19] = (byte)(tsfU >> 24);
+            entropy[20] = 0xAA; entropy[21] = 0x55; entropy[22] = 0x12; entropy[23] = 0x34;
+            entropy[24] = 0x56; entropy[25] = 0x78; entropy[26] = 0x9A; entropy[27] = 0xBC;
+            entropy[28] = 0xDE; entropy[29] = 0xF0; entropy[30] = 0xFE; entropy[31] = 0xED;
+            entropy[32] = 0xCA; entropy[33] = 0xFE; entropy[34] = 0xBA; entropy[35] = 0xBE;
+
+            byte[] h1 = PureSha1.Hash(entropy);
+            for (int i = 0; i < 36; i++) entropy[i] ^= 0x5C;
+            byte[] h2 = PureSha1.Hash(entropy);
+
+            byte[] snonce = new byte[32];
+            Array.Copy(h1, 0, snonce, 0, 20);
+            Array.Copy(h2, 0, snonce, 20, 12);
+            return snonce;
+        }
+
+        public bool ProcessEapolFrame(byte[] pkt, int eapolOffset, uint tsfL, uint tsfU, out byte[] responseFrame)
+        {
+            responseFrame = null;
+            if (pkt == null || eapolOffset + 4 > pkt.Length) return false;
+
+            byte eapolType = pkt[eapolOffset + 1];
+            if (eapolType != 3) return false; // 3 = EAPOL-Key
+
+            int bodyLen = (pkt[eapolOffset + 2] << 8) | pkt[eapolOffset + 3];
+            if (eapolOffset + 4 + bodyLen > pkt.Length) return false;
+
+            int kbOffset = eapolOffset + 4;
+            byte descType = pkt[kbOffset];
+            if (descType != 2 && descType != 254) return false; // 2 = RSN, 254 = WPA
+
+            ushort keyInfo = (ushort)((pkt[kbOffset + 1] << 8) | pkt[kbOffset + 2]);
+            bool isPairwise = (keyInfo & (1 << 3)) != 0;
+            bool isInstall = (keyInfo & (1 << 6)) != 0;
+            bool isAck = (keyInfo & (1 << 7)) != 0;
+            bool isMic = (keyInfo & (1 << 8)) != 0;
+
+            // Handle Message 1 (Pairwise=1, Ack=1, MIC=0)
+            if (isPairwise && isAck && !isMic)
+            {
+                // Replay counter (8 bytes at kbOffset + 5)
+                for (int i = 0; i < 8; i++) Msg1ReplayCounter[i] = pkt[kbOffset + 5 + i];
+
+                // ANonce (32 bytes at kbOffset + 13)
+                for (int i = 0; i < 32; i++) ANonce[i] = pkt[kbOffset + 13 + i];
+
+                // Generate SNonce
+                SNonce = GenerateSNonce(StationMac, ApBssid, tsfL, tsfU);
+
+                // Derive PTK (64 bytes)
+                Ptk = PurePrf512.DerivePtk(Pmk, ApBssid, StationMac, ANonce, SNonce);
+                Array.Copy(Ptk, 0, Kck, 0, 16);
+                Array.Copy(Ptk, 16, Kek, 0, 16);
+                Array.Copy(Ptk, 32, Tk, 0, 16);
+
+                // Construct Message 2
+                responseFrame = BuildMessage2();
+                State = Wpa2HandshakeState.Msg2Sent;
+                return true;
+            }
+
+            // Handle Message 3 (Pairwise=1, Ack=1, MIC=1)
+            if (isPairwise && isAck && isMic && (State == Wpa2HandshakeState.Msg2Sent || State == Wpa2HandshakeState.WaitingMsg3))
+            {
+                for (int i = 0; i < 8; i++) Msg3ReplayCounter[i] = pkt[kbOffset + 5 + i];
+
+                // Extract AP MIC (16 bytes at kbOffset + 77)
+                byte[] apMic = new byte[16];
+                for (int i = 0; i < 16; i++) apMic[i] = pkt[kbOffset + 77 + i];
+
+                // Zero out MIC in a copy of the packet and verify HMAC-SHA1
+                int eapolPacketLen = 4 + bodyLen;
+                byte[] verifyBuf = new byte[eapolPacketLen];
+                Array.Copy(pkt, eapolOffset, verifyBuf, 0, eapolPacketLen);
+                for (int i = 0; i < 16; i++) verifyBuf[4 + 77 + i] = 0;
+
+                byte[] computedHmac = PureHmacSha1.Compute(Kck, verifyBuf);
+                bool valid = true;
+                for (int i = 0; i < 16; i++)
+                {
+                    if (computedHmac[i] != apMic[i])
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+
+                if (!valid)
+                {
+                    State = Wpa2HandshakeState.Failed;
+                    FailureReason = "AP Message 3 MIC verification failed! Incorrect passphrase.";
+                    return false;
+                }
+
+                // AP Message 3 verified! Build Message 4
+                responseFrame = BuildMessage4();
+                State = Wpa2HandshakeState.Completed;
+                return true;
+            }
+
+            return false;
+        }
+
+        public byte[] BuildMessage2()
+        {
+            int rsnLen = StationRsnIe.Length; // 22 bytes
+            int bodyLen = 95 + rsnLen;       // 117 bytes
+            int eapolLen = 4 + bodyLen;      // 121 bytes
+
+            byte[] eapol = new byte[eapolLen];
+            eapol[0] = 0x01; // Version 1
+            eapol[1] = 0x03; // EAPOL-Key
+            eapol[2] = (byte)(bodyLen >> 8);
+            eapol[3] = (byte)(bodyLen & 0xFF);
+
+            int kb = 4;
+            eapol[kb] = 0x02; // Descriptor Type: RSN
+            // Key Info: Pairwise=1 (bit 3), MIC=1 (bit 8), Version=2 (bits 0-2) -> 0x010A
+            eapol[kb + 1] = 0x01;
+            eapol[kb + 2] = 0x0A;
+            eapol[kb + 3] = 0x00; // Key Length: 0
+            eapol[kb + 4] = 0x00;
+
+            // Replay Counter matching Message 1
+            for (int i = 0; i < 8; i++) eapol[kb + 5 + i] = Msg1ReplayCounter[i];
+
+            // SNonce
+            for (int i = 0; i < 32; i++) eapol[kb + 13 + i] = SNonce[i];
+
+            // Key IV (16 bytes = 0), RSC (8 bytes = 0), Reserved (8 bytes = 0), MIC (16 bytes = 0)
+            // Array defaults to 0.
+
+            // Key Data Length (22 bytes)
+            eapol[kb + 93] = (byte)(rsnLen >> 8);
+            eapol[kb + 94] = (byte)(rsnLen & 0xFF);
+
+            // Key Data: Station RSN IE
+            Array.Copy(StationRsnIe, 0, eapol, kb + 95, rsnLen);
+
+            // Compute 16-byte HMAC-SHA1 MIC over whole EAPOL frame
+            byte[] mic = PureHmacSha1.Compute(Kck, eapol);
+            Array.Copy(mic, 0, eapol, kb + 77, 16);
+
+            return WrapIn80211DataFrame(eapol);
+        }
+
+        public byte[] BuildMessage4()
+        {
+            int bodyLen = 95;           // 95 bytes (Key Data Length = 0)
+            int eapolLen = 4 + bodyLen; // 99 bytes
+
+            byte[] eapol = new byte[eapolLen];
+            eapol[0] = 0x01; // Version 1
+            eapol[1] = 0x03; // EAPOL-Key
+            eapol[2] = (byte)(bodyLen >> 8);
+            eapol[3] = (byte)(bodyLen & 0xFF);
+
+            int kb = 4;
+            eapol[kb] = 0x02; // Descriptor Type: RSN
+            // Key Info: Pairwise=1 (bit 3), MIC=1 (bit 8), Secure=1 (bit 9), Version=2 (bits 0-2) -> 0x030A
+            eapol[kb + 1] = 0x03;
+            eapol[kb + 2] = 0x0A;
+            eapol[kb + 3] = 0x00; // Key Length: 0
+            eapol[kb + 4] = 0x00;
+
+            // Replay Counter matching Message 3
+            for (int i = 0; i < 8; i++) eapol[kb + 5 + i] = Msg3ReplayCounter[i];
+
+            // SNonce is 0 in Message 4
+            // Key IV, RSC, Reserved, MIC are 0.
+            eapol[kb + 93] = 0x00; // Key Data Length = 0
+            eapol[kb + 94] = 0x00;
+
+            // Compute 16-byte HMAC-SHA1 MIC
+            byte[] mic = PureHmacSha1.Compute(Kck, eapol);
+            Array.Copy(mic, 0, eapol, kb + 77, 16);
+
+            return WrapIn80211DataFrame(eapol);
+        }
+
+        private byte[] WrapIn80211DataFrame(byte[] eapolPayload)
+        {
+            // 802.11 QoS Data Frame:
+            // 24 bytes MAC header + 2 bytes QoS Control + 8 bytes LLC/SNAP + EAPOL
+            int totalLen = 26 + 8 + eapolPayload.Length;
+            byte[] frame = new byte[totalLen];
+
+            // Frame Control: QoS Data (0x88), ToDS=1 (0x01)
+            frame[0] = 0x88;
+            frame[1] = 0x01;
+            frame[2] = 0x00; // Duration
+            frame[3] = 0x00;
+
+            // Address 1: Receiver / AP BSSID
+            Array.Copy(ApBssid, 0, frame, 4, 6);
+            // Address 2: Transmitter / Station MAC
+            Array.Copy(StationMac, 0, frame, 10, 6);
+            // Address 3: Destination / AP BSSID
+            Array.Copy(ApBssid, 0, frame, 16, 6);
+
+            // Sequence Control
+            ushort seq = SequenceNumber++;
+            frame[22] = (byte)((seq << 4) & 0xFF);
+            frame[23] = (byte)((seq >> 4) & 0xFF);
+
+            // QoS Control (TID 0)
+            frame[24] = 0x00;
+            frame[25] = 0x00;
+
+            // LLC / SNAP Header (802.1X EtherType 0x888E)
+            frame[26] = 0xAA;
+            frame[27] = 0xAA;
+            frame[28] = 0x03;
+            frame[29] = 0x00;
+            frame[30] = 0x00;
+            frame[31] = 0x00;
+            frame[32] = 0x88;
+            frame[33] = 0x8E;
+
+            // EAPOL Payload
+            Array.Copy(eapolPayload, 0, frame, 34, eapolPayload.Length);
+
+            return frame;
+        }
+    }
 
     /// <summary>
     /// Bare-metal Atheros AR2425 / AR5007EG / AR5212 IEEE 802.11b/g Wireless Driver.
@@ -819,7 +1459,14 @@ namespace RTL8102E_Driver
         public uint RxPacketsCount { get; private set; } = 0;
         public uint TxPacketsCount { get; private set; } = 0;
         public uint BeaconFramesCount { get; private set; } = 0;
-        public string HardwareSummary { get; private set; } = "Nao detetado";
+        public string HardwareSummary { get; private set; } = "Not detected";
+
+        public Wpa2HandshakeEngine Wpa2Engine;
+        public const uint AR5K_TSF_L32 = 0x804C;
+        public const uint AR5K_TSF_U32 = 0x8050;
+        public const uint AR5K_KEYTABLE_VALID = 0x00008000;
+        public const uint AR5K_KEYTABLE_TYPE_CCM = 0x00000006;
+        public const uint AR5K_KEYTABLE_TYPE_NULL = 0x00000007;
 
         // RX DMA Descriptors (16 descriptors)
         private const int RX_DESC_COUNT = 16;
@@ -1529,9 +2176,103 @@ namespace RTL8102E_Driver
                     }
                 }
             }
+            else if (frameType == 0xC0 || frameType == 0xA0) // Deauthentication or Disassociation
+            {
+                if (Wpa2Engine != null && Wpa2Engine.State != Wpa2HandshakeState.Idle && Wpa2Engine.State != Wpa2HandshakeState.Failed)
+                {
+                    ushort reason = pkt.Length >= 26 ? (ushort)(pkt[24] | (pkt[25] << 8)) : (ushort)0;
+                    Wpa2Engine.State = Wpa2HandshakeState.Failed;
+                    Wpa2Engine.FailureReason = "AP Deauthenticated/Disconnected station (Code " + reason + ")";
+                }
+            }
+            else if ((frameControl & 0x0C) == 0x08) // Data or QoS Data frame
+            {
+                // Check for 802.1X EAPOL (LLC/SNAP: AA AA 03 00 00 00 88 8E)
+                // Offset can be 26 (QoS Data) or 24 (Regular Data)
+                int snapOffset = ((frameControl & 0xF0) == 0x80) ? 26 : 24;
+                if (pkt.Length < snapOffset + 8 && pkt.Length >= 32)
+                {
+                    // Fallback check
+                    snapOffset = 24;
+                }
+
+                if (pkt.Length >= snapOffset + 8)
+                {
+                    if (pkt[snapOffset] == 0xAA && pkt[snapOffset + 1] == 0xAA &&
+                        pkt[snapOffset + 2] == 0x03 && pkt[snapOffset + 3] == 0x00 &&
+                        pkt[snapOffset + 4] == 0x00 && pkt[snapOffset + 5] == 0x00 &&
+                        pkt[snapOffset + 6] == 0x88 && pkt[snapOffset + 7] == 0x8E)
+                    {
+                        int eapolOffset = snapOffset + 8;
+                        if (Wpa2Engine != null && Wpa2Engine.State != Wpa2HandshakeState.Failed && Wpa2Engine.State != Wpa2HandshakeState.Completed)
+                        {
+                            uint tsfL = ReadReg(AR5K_TSF_L32);
+                            uint tsfU = ReadReg(AR5K_TSF_U32);
+
+                            byte[] respFrame;
+                            bool processed = Wpa2Engine.ProcessEapolFrame(pkt, eapolOffset, tsfL, tsfU, out respFrame);
+                            if (processed && respFrame != null)
+                            {
+                                SendRawFrame(respFrame, true);
+
+                                if (Wpa2Engine.State == Wpa2HandshakeState.Completed)
+                                {
+                                    // Hardware key installation (CCMP AES-128 into AR5212 Key Table entry 0)
+                                    SetHardwareKey(0, AR5K_KEYTABLE_TYPE_CCM, Wpa2Engine.ApBssid, Wpa2Engine.Tk);
+                                    LastAssocSuccess = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         public volatile bool LastAssocSuccess = false;
+
+        public void SetHardwareKey(int entry, uint cipherType, byte[] mac, byte[] key)
+        {
+            if (entry < 0 || entry >= 128) return;
+            uint baseReg = 0x8800 + (uint)(entry << 5);
+
+            for (int i = 0; i < 4; i++)
+            {
+                uint kw = 0;
+                if (key != null && key.Length >= (i + 1) * 4)
+                {
+                    kw = (uint)(key[i * 4] | (key[i * 4 + 1] << 8) | (key[i * 4 + 2] << 16) | (key[i * 4 + 3] << 24));
+                }
+                WriteReg(baseReg + (uint)(i * 4), kw);
+            }
+
+            WriteReg(baseReg + 16, 0); // Reserved / TX MIC
+            WriteReg(baseReg + 20, cipherType); // CCM = 6
+
+            uint mac0 = 0;
+            if (mac != null && mac.Length >= 4)
+            {
+                mac0 = (uint)(mac[0] | (mac[1] << 8) | (mac[2] << 16) | (mac[3] << 24));
+            }
+            WriteReg(baseReg + 24, mac0);
+
+            uint mac1 = AR5K_KEYTABLE_VALID;
+            if (mac != null && mac.Length >= 6)
+            {
+                mac1 |= (uint)(mac[4] | (mac[5] << 8));
+            }
+            WriteReg(baseReg + 28, mac1);
+        }
+
+        public void ResetHardwareKey(int entry)
+        {
+            if (entry < 0 || entry >= 128) return;
+            uint baseReg = 0x8800 + (uint)(entry << 5);
+            for (int i = 0; i < 8; i++)
+            {
+                WriteReg(baseReg + (uint)(i * 4), 0);
+            }
+            WriteReg(baseReg + 20, AR5K_KEYTABLE_TYPE_NULL);
+        }
 
         public void SendRawFrame(byte[] frame, bool isUnicast)
         {
@@ -1624,13 +2365,14 @@ namespace RTL8102E_Driver
             SendRawFrame(frame, true);
         }
 
-        public void SendAssocRequestFrame(byte[] bssid, string ssid)
+        public void SendAssocRequestFrame(byte[] bssid, string ssid, bool isWpa2 = false)
         {
             byte[] ssidBytes = System.Text.Encoding.ASCII.GetBytes(ssid ?? "");
             int sLen = ssidBytes.Length;
             if (sLen > 32) sLen = 32;
 
-            int totalLen = 24 + 4 + 2 + sLen + 10 + 6;
+            int rsnLen = isWpa2 ? 22 : 0;
+            int totalLen = 24 + 4 + 2 + sLen + 10 + 6 + rsnLen;
             byte[] frame = new byte[totalLen];
             frame[0] = 0x00; // Management: Association Request
             frame[1] = 0x00;
@@ -1648,8 +2390,9 @@ namespace RTL8102E_Driver
             // Seq Ctrl
             frame[22] = 0x10; frame[23] = 0x00;
 
-            // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time)
-            frame[24] = 0x11; frame[25] = 0x04;
+            // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time; + 0x0010 Privacy if WPA2)
+            frame[24] = isWpa2 ? (byte)0x31 : (byte)0x21;
+            frame[25] = 0x04;
             // Listen Interval
             frame[26] = 0x0A; frame[27] = 0x00;
 
@@ -1669,6 +2412,20 @@ namespace RTL8102E_Driver
             frame[pos++] = 0x32;
             frame[pos++] = 0x04;
             frame[pos++] = 0x30; frame[pos++] = 0x48; frame[pos++] = 0x60; frame[pos++] = 0x6C;
+
+            // Tag 48: RSN Information Element (WPA2)
+            if (isWpa2)
+            {
+                frame[pos++] = 0x30;
+                frame[pos++] = 0x14;
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // Version 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x04; // Group: AES-CCMP
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // Pairwise count: 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x04; // Pairwise: AES-CCMP
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // AKM count: 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x02; // AKM: PSK
+                frame[pos++] = 0x00; frame[pos++] = 0x00;                         // Capabilities
+            }
 
             SendRawFrame(frame, true);
         }
@@ -1693,8 +2450,8 @@ namespace RTL8102E_Driver
                 DelayMicroseconds(10);
             }
 
-            // Transmit Association Request Frame
-            SendAssocRequestFrame(bssid, ssid);
+            // Transmit Association Request Frame (Open network)
+            SendAssocRequestFrame(bssid, ssid, false);
 
             for (int i = 0; i < 5000; i++)
             {
@@ -1703,6 +2460,39 @@ namespace RTL8102E_Driver
             }
 
             return true;
+        }
+
+        public void StartWpa2Handshake(string bssidStr, string ssid, int channel, string passphrase)
+        {
+            if (!IsInitialized) return;
+
+            byte[] bssid = ParseMacFast(bssidStr);
+            LastAssocSuccess = false;
+
+            // Tune to AP channel
+            ResetAndTuneChannel(channel);
+            DelayMicroseconds(25000); // 25ms PLL lock
+
+            // Reset hardware key table
+            ResetHardwareKey(0);
+
+            // Initialize WPA2 handshake state machine
+            Wpa2Engine = new Wpa2HandshakeEngine();
+            Wpa2Engine.Initialize(bssid, MacAddress, ssid, passphrase, channel);
+
+            // Transmit 802.11 Open Authentication
+            SendAuthFrame(bssid);
+
+            for (int i = 0; i < 2000; i++)
+            {
+                PollRx();
+                DelayMicroseconds(10);
+            }
+
+            // Transmit 802.11 Association Request with WPA2 RSN IE
+            SendAssocRequestFrame(bssid, ssid, true);
+
+            Wpa2Engine.State = Wpa2HandshakeState.WaitingMsg1;
         }
 
         public static byte[] ParseMacFast(string macStr)
@@ -1954,7 +2744,6 @@ namespace RTL8102E_Driver
         #endregion
     }
 
-
     public class PciDeviceInfo
     {
         public byte Bus;
@@ -2199,7 +2988,7 @@ namespace RTL8102E_Driver
                                     }
                                     else
                                     {
-                                        pInfo.Note = "Dispositivo USB Externo Ligado";
+                                        pInfo.Note = "External USB Device Connected";
                                     }
                                 }
                                 else
@@ -2684,7 +3473,7 @@ namespace RTL8102E_Driver
                 Console.WriteLine("  * EEPROM / RegDomain: Version 0x" + Hex16(_wifiDriver.EepromVersion) +
                                   " | RegDomain 0x" + Hex16(_wifiDriver.EepromRegDomain));
                 Console.WriteLine("  * Radio Telemetry   : Channel " + _wifiDriver.CurrentChannel + " (" + (2407 + 5 * _wifiDriver.CurrentChannel) +
-                                  " MHz) | Antena 1(Main/Preto) + Antena 2(Aux/Branco) OK");
+                                  " MHz) | Antenna 1 (Main/Black) + Antenna 2 (Aux/White) OK");
                 Console.WriteLine("  * 802.11 Frame Stats: RX Frames=" + _wifiDriver.RxPacketsCount +
                                   " (Beacons: " + _wifiDriver.BeaconFramesCount + ") | TX Frames=" + _wifiDriver.TxPacketsCount);
                 if (ConnectedWifi != null)
@@ -2923,7 +3712,7 @@ namespace RTL8102E_Driver
 
                 _wifiDriver.ResetAndTuneChannel(1);
                 SyncDetectedNetworks();
-                _statusBanner = "Varrimento 802.11 concluido! " + WifiNetworks.Count + " rede(s) real(is) detetada(s) no ar.";
+                _statusBanner = "802.11 scan complete! " + WifiNetworks.Count + " real network(s) detected over the air.";
             }
             else
             {
@@ -2973,23 +3762,22 @@ namespace RTL8102E_Driver
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  [1/3] Tuning Atheros RF synthesizer to Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
+            Console.WriteLine("  [1/4] Tuning Atheros RF synthesizer to Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
             SpinPoll(300000);
-
-            Console.WriteLine("  [2/3] Transmitting 802.11 Open Auth & Association Request frames over the air to " + ap.Bssid + "...");
-            bool assocSent = false;
-            if (_wifiDriver != null)
-            {
-                assocSent = _wifiDriver.AssociateWithAp(ap.Bssid, ap.Ssid, ap.Channel);
-            }
-            SpinPoll(400000);
 
             if (ap.IsOpen)
             {
+                Console.WriteLine("  [2/2] Transmitting 802.11 Open Auth & Association Request frames over the air to " + ap.Bssid + "...");
+                if (_wifiDriver != null)
+                {
+                    _wifiDriver.AssociateWithAp(ap.Bssid, ap.Ssid, ap.Channel);
+                }
+                SpinPoll(400000);
+
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  [3/3] Open Network (No Password): 802.11 Association transmitted and active!");
+                Console.WriteLine("  [SUCCESS] Open Network (No Password): 802.11 Association active!");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("        Your phone hotspot now registers this laptop under 'Connected devices'!");
+                Console.WriteLine("            Device is associated and registered on Open Access Point!");
 
                 for (int i = 0; i < WifiNetworks.Count; i++)
                 {
@@ -3001,27 +3789,65 @@ namespace RTL8102E_Driver
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("  [3/3] 802.11 Management Association frames transmitted over the air!");
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine();
-                Console.WriteLine("  [!] WPA2-PSK 4-WAY HANDSHAKE NOTICE:");
-                Console.WriteLine("      Network '" + ap.Ssid + "' requires WPA2-PSK encrypted 4-Way EAPOL Handshake.");
-                Console.WriteLine("      Passphrase was validated (length OK), but Cosmos OS bare-metal environment");
-                Console.WriteLine("      does not have an 802.11i cryptographic WPA-Supplicant daemon to exchange keys.");
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  -> TO CONNECT YOUR PHONE HOTSPOT DIRECTLY:");
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("     In your phone Hotspot settings -> Security, select 'None / Open' (no password).");
-                Console.WriteLine("     The laptop will associate immediately and appear under 'Connected devices'.");
-
-                for (int i = 0; i < WifiNetworks.Count; i++)
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("  [2/4] Transmitting 802.11 Open Auth & RSN Association Request frames over the air...");
+                if (_wifiDriver != null)
                 {
-                    WifiNetworks[i].IsConnected = false;
+                    _wifiDriver.StartWpa2Handshake(ap.Bssid, ap.Ssid, ap.Channel, pwd);
                 }
-                ap.IsConnected = false;
-                _statusBanner = "Connection incomplete: WPA2 key handshake required (use Open Hotspot).";
+
+                Console.WriteLine("  [3/4] Initiating IEEE 802.11i WPA2-PSK 4-Way Handshake with Access Point...");
+                Console.WriteLine("        Awaiting EAPOL-Key Message 1, computing PTK/MIC, and replying Message 2...");
+
+                int timeoutTicks = 450;
+                while (_wifiDriver != null &&
+                       _wifiDriver.Wpa2Engine != null &&
+                       _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Completed &&
+                       _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Failed &&
+                       timeoutTicks > 0)
+                {
+                    _wifiDriver.PollRx();
+                    if (_ethDriver != null) _ethDriver.HackPoll();
+                    for (int spin = 0; spin < 1000; spin++) IOPort.Wait();
+                    timeoutTicks--;
+                }
+
+                if (_wifiDriver != null && _wifiDriver.Wpa2Engine != null && _wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.Completed)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine();
+                    Console.WriteLine("  [4/4] [SUCCESS] WPA2-PSK 4-WAY HANDSHAKE COMPLETED SUCCESSFULLY!");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("        Pairwise CCMP (AES-128) Temporal Key programmed into Atheros AR2425 hardware.");
+                    Console.WriteLine("        Station authenticated with valid MICs. Hotspot client registered!");
+
+                    for (int i = 0; i < WifiNetworks.Count; i++)
+                    {
+                        WifiNetworks[i].IsConnected = false;
+                    }
+                    ap.IsConnected = true;
+                    ConnectedWifi = ap;
+                    _statusBanner = "Authenticated and Connected to '" + ap.Ssid + "' (WPA2-PSK)!";
+                }
+                else
+                {
+                    string failReason = (_wifiDriver != null && _wifiDriver.Wpa2Engine != null && _wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.Failed)
+                        ? _wifiDriver.Wpa2Engine.FailureReason
+                        : "Handshake timed out waiting for AP EAPOL response (Incorrect password or signal loss).";
+
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine("  [4/4] [FAILED] " + failReason);
+                    Console.WriteLine("        Authentication rejected. Laptop was NOT connected.");
+
+                    for (int i = 0; i < WifiNetworks.Count; i++)
+                    {
+                        WifiNetworks[i].IsConnected = false;
+                    }
+                    ap.IsConnected = false;
+                    ConnectedWifi = null;
+                    _statusBanner = "Connection failed: " + failReason;
+                }
             }
 
             Console.WriteLine();
@@ -3156,7 +3982,7 @@ namespace RTL8102E_Driver
 
         private string DescribeBar(uint bar)
         {
-            if (bar == 0) return "Nao utilizado";
+            if (bar == 0) return "Not used";
             if ((bar & 1) == 1) return "I/O Port 0x" + Hex16((ushort)(bar & 0xFFFC));
             return "MMIO 0x" + Hex32(bar & 0xFFFFFFF0);
         }
@@ -3213,6 +4039,4 @@ namespace RTL8102E_Driver
             return Hex16((ushort)(dw >> 16)) + Hex16((ushort)(dw & 0xFFFF));
         }
     }
-
-
 }

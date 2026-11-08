@@ -250,7 +250,7 @@ namespace RTL8102E_Driver
                                     }
                                     else
                                     {
-                                        pInfo.Note = "Dispositivo USB Externo Ligado";
+                                        pInfo.Note = "External USB Device Connected";
                                     }
                                 }
                                 else
@@ -735,7 +735,7 @@ namespace RTL8102E_Driver
                 Console.WriteLine("  * EEPROM / RegDomain: Version 0x" + Hex16(_wifiDriver.EepromVersion) +
                                   " | RegDomain 0x" + Hex16(_wifiDriver.EepromRegDomain));
                 Console.WriteLine("  * Radio Telemetry   : Channel " + _wifiDriver.CurrentChannel + " (" + (2407 + 5 * _wifiDriver.CurrentChannel) +
-                                  " MHz) | Antena 1(Main/Preto) + Antena 2(Aux/Branco) OK");
+                                  " MHz) | Antenna 1 (Main/Black) + Antenna 2 (Aux/White) OK");
                 Console.WriteLine("  * 802.11 Frame Stats: RX Frames=" + _wifiDriver.RxPacketsCount +
                                   " (Beacons: " + _wifiDriver.BeaconFramesCount + ") | TX Frames=" + _wifiDriver.TxPacketsCount);
                 if (ConnectedWifi != null)
@@ -974,7 +974,7 @@ namespace RTL8102E_Driver
 
                 _wifiDriver.ResetAndTuneChannel(1);
                 SyncDetectedNetworks();
-                _statusBanner = "Varrimento 802.11 concluido! " + WifiNetworks.Count + " rede(s) real(is) detetada(s) no ar.";
+                _statusBanner = "802.11 scan complete! " + WifiNetworks.Count + " real network(s) detected over the air.";
             }
             else
             {
@@ -1024,23 +1024,22 @@ namespace RTL8102E_Driver
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  [1/3] Tuning Atheros RF synthesizer to Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
+            Console.WriteLine("  [1/4] Tuning Atheros RF synthesizer to Channel " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
             SpinPoll(300000);
-
-            Console.WriteLine("  [2/3] Transmitting 802.11 Open Auth & Association Request frames over the air to " + ap.Bssid + "...");
-            bool assocSent = false;
-            if (_wifiDriver != null)
-            {
-                assocSent = _wifiDriver.AssociateWithAp(ap.Bssid, ap.Ssid, ap.Channel);
-            }
-            SpinPoll(400000);
 
             if (ap.IsOpen)
             {
+                Console.WriteLine("  [2/2] Transmitting 802.11 Open Auth & Association Request frames over the air to " + ap.Bssid + "...");
+                if (_wifiDriver != null)
+                {
+                    _wifiDriver.AssociateWithAp(ap.Bssid, ap.Ssid, ap.Channel);
+                }
+                SpinPoll(400000);
+
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  [3/3] Open Network (No Password): 802.11 Association transmitted and active!");
+                Console.WriteLine("  [SUCCESS] Open Network (No Password): 802.11 Association active!");
                 Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("        Your phone hotspot now registers this laptop under 'Connected devices'!");
+                Console.WriteLine("            Device is associated and registered on Open Access Point!");
 
                 for (int i = 0; i < WifiNetworks.Count; i++)
                 {
@@ -1052,27 +1051,65 @@ namespace RTL8102E_Driver
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine("  [3/3] 802.11 Management Association frames transmitted over the air!");
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine();
-                Console.WriteLine("  [!] WPA2-PSK 4-WAY HANDSHAKE NOTICE:");
-                Console.WriteLine("      Network '" + ap.Ssid + "' requires WPA2-PSK encrypted 4-Way EAPOL Handshake.");
-                Console.WriteLine("      Passphrase was validated (length OK), but Cosmos OS bare-metal environment");
-                Console.WriteLine("      does not have an 802.11i cryptographic WPA-Supplicant daemon to exchange keys.");
-                Console.WriteLine();
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  -> TO CONNECT YOUR PHONE HOTSPOT DIRECTLY:");
-                Console.ForegroundColor = ConsoleColor.White;
-                Console.WriteLine("     In your phone Hotspot settings -> Security, select 'None / Open' (no password).");
-                Console.WriteLine("     The laptop will associate immediately and appear under 'Connected devices'.");
-
-                for (int i = 0; i < WifiNetworks.Count; i++)
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine("  [2/4] Transmitting 802.11 Open Auth & RSN Association Request frames over the air...");
+                if (_wifiDriver != null)
                 {
-                    WifiNetworks[i].IsConnected = false;
+                    _wifiDriver.StartWpa2Handshake(ap.Bssid, ap.Ssid, ap.Channel, pwd);
                 }
-                ap.IsConnected = false;
-                _statusBanner = "Connection incomplete: WPA2 key handshake required (use Open Hotspot).";
+
+                Console.WriteLine("  [3/4] Initiating IEEE 802.11i WPA2-PSK 4-Way Handshake with Access Point...");
+                Console.WriteLine("        Awaiting EAPOL-Key Message 1, computing PTK/MIC, and replying Message 2...");
+
+                int timeoutTicks = 450;
+                while (_wifiDriver != null &&
+                       _wifiDriver.Wpa2Engine != null &&
+                       _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Completed &&
+                       _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Failed &&
+                       timeoutTicks > 0)
+                {
+                    _wifiDriver.PollRx();
+                    if (_ethDriver != null) _ethDriver.HackPoll();
+                    for (int spin = 0; spin < 1000; spin++) IOPort.Wait();
+                    timeoutTicks--;
+                }
+
+                if (_wifiDriver != null && _wifiDriver.Wpa2Engine != null && _wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.Completed)
+                {
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine();
+                    Console.WriteLine("  [4/4] [SUCCESS] WPA2-PSK 4-WAY HANDSHAKE COMPLETED SUCCESSFULLY!");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine("        Pairwise CCMP (AES-128) Temporal Key programmed into Atheros AR2425 hardware.");
+                    Console.WriteLine("        Station authenticated with valid MICs. Hotspot client registered!");
+
+                    for (int i = 0; i < WifiNetworks.Count; i++)
+                    {
+                        WifiNetworks[i].IsConnected = false;
+                    }
+                    ap.IsConnected = true;
+                    ConnectedWifi = ap;
+                    _statusBanner = "Authenticated and Connected to '" + ap.Ssid + "' (WPA2-PSK)!";
+                }
+                else
+                {
+                    string failReason = (_wifiDriver != null && _wifiDriver.Wpa2Engine != null && _wifiDriver.Wpa2Engine.State == Wpa2HandshakeState.Failed)
+                        ? _wifiDriver.Wpa2Engine.FailureReason
+                        : "Handshake timed out waiting for AP EAPOL response (Incorrect password or signal loss).";
+
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine();
+                    Console.WriteLine("  [4/4] [FAILED] " + failReason);
+                    Console.WriteLine("        Authentication rejected. Laptop was NOT connected.");
+
+                    for (int i = 0; i < WifiNetworks.Count; i++)
+                    {
+                        WifiNetworks[i].IsConnected = false;
+                    }
+                    ap.IsConnected = false;
+                    ConnectedWifi = null;
+                    _statusBanner = "Connection failed: " + failReason;
+                }
             }
 
             Console.WriteLine();
@@ -1207,7 +1244,7 @@ namespace RTL8102E_Driver
 
         private string DescribeBar(uint bar)
         {
-            if (bar == 0) return "Nao utilizado";
+            if (bar == 0) return "Not used";
             if ((bar & 1) == 1) return "I/O Port 0x" + Hex16((ushort)(bar & 0xFFFC));
             return "MMIO 0x" + Hex32(bar & 0xFFFFFFF0);
         }

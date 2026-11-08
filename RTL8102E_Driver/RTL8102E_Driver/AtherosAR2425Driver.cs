@@ -29,7 +29,14 @@ namespace RTL8102E_Driver
         public uint RxPacketsCount { get; private set; } = 0;
         public uint TxPacketsCount { get; private set; } = 0;
         public uint BeaconFramesCount { get; private set; } = 0;
-        public string HardwareSummary { get; private set; } = "Nao detetado";
+        public string HardwareSummary { get; private set; } = "Not detected";
+
+        public Wpa2HandshakeEngine Wpa2Engine;
+        public const uint AR5K_TSF_L32 = 0x804C;
+        public const uint AR5K_TSF_U32 = 0x8050;
+        public const uint AR5K_KEYTABLE_VALID = 0x00008000;
+        public const uint AR5K_KEYTABLE_TYPE_CCM = 0x00000006;
+        public const uint AR5K_KEYTABLE_TYPE_NULL = 0x00000007;
 
         // RX DMA Descriptors (16 descriptors)
         private const int RX_DESC_COUNT = 16;
@@ -739,9 +746,103 @@ namespace RTL8102E_Driver
                     }
                 }
             }
+            else if (frameType == 0xC0 || frameType == 0xA0) // Deauthentication or Disassociation
+            {
+                if (Wpa2Engine != null && Wpa2Engine.State != Wpa2HandshakeState.Idle && Wpa2Engine.State != Wpa2HandshakeState.Failed)
+                {
+                    ushort reason = pkt.Length >= 26 ? (ushort)(pkt[24] | (pkt[25] << 8)) : (ushort)0;
+                    Wpa2Engine.State = Wpa2HandshakeState.Failed;
+                    Wpa2Engine.FailureReason = "AP Deauthenticated/Disconnected station (Code " + reason + ")";
+                }
+            }
+            else if ((frameControl & 0x0C) == 0x08) // Data or QoS Data frame
+            {
+                // Check for 802.1X EAPOL (LLC/SNAP: AA AA 03 00 00 00 88 8E)
+                // Offset can be 26 (QoS Data) or 24 (Regular Data)
+                int snapOffset = ((frameControl & 0xF0) == 0x80) ? 26 : 24;
+                if (pkt.Length < snapOffset + 8 && pkt.Length >= 32)
+                {
+                    // Fallback check
+                    snapOffset = 24;
+                }
+
+                if (pkt.Length >= snapOffset + 8)
+                {
+                    if (pkt[snapOffset] == 0xAA && pkt[snapOffset + 1] == 0xAA &&
+                        pkt[snapOffset + 2] == 0x03 && pkt[snapOffset + 3] == 0x00 &&
+                        pkt[snapOffset + 4] == 0x00 && pkt[snapOffset + 5] == 0x00 &&
+                        pkt[snapOffset + 6] == 0x88 && pkt[snapOffset + 7] == 0x8E)
+                    {
+                        int eapolOffset = snapOffset + 8;
+                        if (Wpa2Engine != null && Wpa2Engine.State != Wpa2HandshakeState.Failed && Wpa2Engine.State != Wpa2HandshakeState.Completed)
+                        {
+                            uint tsfL = ReadReg(AR5K_TSF_L32);
+                            uint tsfU = ReadReg(AR5K_TSF_U32);
+
+                            byte[] respFrame;
+                            bool processed = Wpa2Engine.ProcessEapolFrame(pkt, eapolOffset, tsfL, tsfU, out respFrame);
+                            if (processed && respFrame != null)
+                            {
+                                SendRawFrame(respFrame, true);
+
+                                if (Wpa2Engine.State == Wpa2HandshakeState.Completed)
+                                {
+                                    // Hardware key installation (CCMP AES-128 into AR5212 Key Table entry 0)
+                                    SetHardwareKey(0, AR5K_KEYTABLE_TYPE_CCM, Wpa2Engine.ApBssid, Wpa2Engine.Tk);
+                                    LastAssocSuccess = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         public volatile bool LastAssocSuccess = false;
+
+        public void SetHardwareKey(int entry, uint cipherType, byte[] mac, byte[] key)
+        {
+            if (entry < 0 || entry >= 128) return;
+            uint baseReg = 0x8800 + (uint)(entry << 5);
+
+            for (int i = 0; i < 4; i++)
+            {
+                uint kw = 0;
+                if (key != null && key.Length >= (i + 1) * 4)
+                {
+                    kw = (uint)(key[i * 4] | (key[i * 4 + 1] << 8) | (key[i * 4 + 2] << 16) | (key[i * 4 + 3] << 24));
+                }
+                WriteReg(baseReg + (uint)(i * 4), kw);
+            }
+
+            WriteReg(baseReg + 16, 0); // Reserved / TX MIC
+            WriteReg(baseReg + 20, cipherType); // CCM = 6
+
+            uint mac0 = 0;
+            if (mac != null && mac.Length >= 4)
+            {
+                mac0 = (uint)(mac[0] | (mac[1] << 8) | (mac[2] << 16) | (mac[3] << 24));
+            }
+            WriteReg(baseReg + 24, mac0);
+
+            uint mac1 = AR5K_KEYTABLE_VALID;
+            if (mac != null && mac.Length >= 6)
+            {
+                mac1 |= (uint)(mac[4] | (mac[5] << 8));
+            }
+            WriteReg(baseReg + 28, mac1);
+        }
+
+        public void ResetHardwareKey(int entry)
+        {
+            if (entry < 0 || entry >= 128) return;
+            uint baseReg = 0x8800 + (uint)(entry << 5);
+            for (int i = 0; i < 8; i++)
+            {
+                WriteReg(baseReg + (uint)(i * 4), 0);
+            }
+            WriteReg(baseReg + 20, AR5K_KEYTABLE_TYPE_NULL);
+        }
 
         public void SendRawFrame(byte[] frame, bool isUnicast)
         {
@@ -834,13 +935,14 @@ namespace RTL8102E_Driver
             SendRawFrame(frame, true);
         }
 
-        public void SendAssocRequestFrame(byte[] bssid, string ssid)
+        public void SendAssocRequestFrame(byte[] bssid, string ssid, bool isWpa2 = false)
         {
             byte[] ssidBytes = System.Text.Encoding.ASCII.GetBytes(ssid ?? "");
             int sLen = ssidBytes.Length;
             if (sLen > 32) sLen = 32;
 
-            int totalLen = 24 + 4 + 2 + sLen + 10 + 6;
+            int rsnLen = isWpa2 ? 22 : 0;
+            int totalLen = 24 + 4 + 2 + sLen + 10 + 6 + rsnLen;
             byte[] frame = new byte[totalLen];
             frame[0] = 0x00; // Management: Association Request
             frame[1] = 0x00;
@@ -858,8 +960,9 @@ namespace RTL8102E_Driver
             // Seq Ctrl
             frame[22] = 0x10; frame[23] = 0x00;
 
-            // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time)
-            frame[24] = 0x11; frame[25] = 0x04;
+            // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time; + 0x0010 Privacy if WPA2)
+            frame[24] = isWpa2 ? (byte)0x31 : (byte)0x21;
+            frame[25] = 0x04;
             // Listen Interval
             frame[26] = 0x0A; frame[27] = 0x00;
 
@@ -879,6 +982,20 @@ namespace RTL8102E_Driver
             frame[pos++] = 0x32;
             frame[pos++] = 0x04;
             frame[pos++] = 0x30; frame[pos++] = 0x48; frame[pos++] = 0x60; frame[pos++] = 0x6C;
+
+            // Tag 48: RSN Information Element (WPA2)
+            if (isWpa2)
+            {
+                frame[pos++] = 0x30;
+                frame[pos++] = 0x14;
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // Version 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x04; // Group: AES-CCMP
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // Pairwise count: 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x04; // Pairwise: AES-CCMP
+                frame[pos++] = 0x01; frame[pos++] = 0x00;                         // AKM count: 1
+                frame[pos++] = 0x00; frame[pos++] = 0x0F; frame[pos++] = 0xAC; frame[pos++] = 0x02; // AKM: PSK
+                frame[pos++] = 0x00; frame[pos++] = 0x00;                         // Capabilities
+            }
 
             SendRawFrame(frame, true);
         }
@@ -903,8 +1020,8 @@ namespace RTL8102E_Driver
                 DelayMicroseconds(10);
             }
 
-            // Transmit Association Request Frame
-            SendAssocRequestFrame(bssid, ssid);
+            // Transmit Association Request Frame (Open network)
+            SendAssocRequestFrame(bssid, ssid, false);
 
             for (int i = 0; i < 5000; i++)
             {
@@ -913,6 +1030,39 @@ namespace RTL8102E_Driver
             }
 
             return true;
+        }
+
+        public void StartWpa2Handshake(string bssidStr, string ssid, int channel, string passphrase)
+        {
+            if (!IsInitialized) return;
+
+            byte[] bssid = ParseMacFast(bssidStr);
+            LastAssocSuccess = false;
+
+            // Tune to AP channel
+            ResetAndTuneChannel(channel);
+            DelayMicroseconds(25000); // 25ms PLL lock
+
+            // Reset hardware key table
+            ResetHardwareKey(0);
+
+            // Initialize WPA2 handshake state machine
+            Wpa2Engine = new Wpa2HandshakeEngine();
+            Wpa2Engine.Initialize(bssid, MacAddress, ssid, passphrase, channel);
+
+            // Transmit 802.11 Open Authentication
+            SendAuthFrame(bssid);
+
+            for (int i = 0; i < 2000; i++)
+            {
+                PollRx();
+                DelayMicroseconds(10);
+            }
+
+            // Transmit 802.11 Association Request with WPA2 RSN IE
+            SendAssocRequestFrame(bssid, ssid, true);
+
+            Wpa2Engine.State = Wpa2HandshakeState.WaitingMsg1;
         }
 
         public static byte[] ParseMacFast(string macStr)
