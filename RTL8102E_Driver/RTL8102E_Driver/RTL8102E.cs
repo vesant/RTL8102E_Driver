@@ -26,6 +26,25 @@ namespace RTL8102E_Driver
         public static uint HardwareRxBytes = 0;
         public static uint HardwareTxPackets = 0;
         public static uint HardwareRxPackets = 0;
+        public static Action<byte[], bool> OnPacketSniffed = null;
+
+        // Diagnostic Telemetry Properties
+        public uint MmioBase => mmioBase;
+        public uint RxRingPhysAddr => rxDescBlock != null ? (uint)rxDescBlock.Offset : 0;
+        public uint TxRingPhysAddr => txDescBlock != null ? (uint)txDescBlock.Offset : 0;
+        public int CurrentRxIndex => currentRxDesc;
+        public int CurrentTxIndex => currentTxDesc;
+        public string PciLocation => pciDevice != null ? $"{pciDevice.bus}:{pciDevice.slot}:{pciDevice.function}" : "N/A";
+        public byte ReadCommandReg() => mmio != null ? mmio.Bytes[0x37] : (byte)0;
+        public byte ReadPhyStatusReg() => mmio != null ? mmio.Bytes[0x6C] : (byte)0;
+        public ushort ReadIsrReg() => mmio != null ? mmio.Words[0x3E] : (ushort)0;
+        public ushort ReadImrReg() => mmio != null ? mmio.Words[0x3C] : (ushort)0;
+        public uint ReadRxConfigReg() => mmio != null ? mmio.DWords[0x44] : 0;
+        public uint ReadTxConfigReg() => mmio != null ? mmio.DWords[0x40] : 0;
+        public string GetMacString()
+        {
+            return $"{macBytes[0]:X2}:{macBytes[1]:X2}:{macBytes[2]:X2}:{macBytes[3]:X2}:{macBytes[4]:X2}:{macBytes[5]:X2}";
+        }
         
         // Boilerplate methods
         public override byte[] ReceivePacket() { return null; }
@@ -342,6 +361,11 @@ namespace RTL8102E_Driver
             HardwareTxBytes += txLength;
             HardwareTxPackets++;
 
+            if (OnPacketSniffed != null)
+            {
+                try { OnPacketSniffed(buffer, true); } catch { }
+            }
+
             // Trigger TX poll (TxPoll register 0x38 = 0x40)
             mmio.Bytes[0x38] = 0x40;
             mmio.Bytes[0x38] = 0x40; // Double kick (Linux 8168 doorbell hack)
@@ -384,6 +408,11 @@ namespace RTL8102E_Driver
                     for (uint i = 0; i < length; i++)
                     {
                         packet[i] = rxBuffers[currentRxDesc][i];
+                    }
+
+                    if (OnPacketSniffed != null)
+                    {
+                        try { OnPacketSniffed(packet, false); } catch { }
                     }
 
                     // Send to NetworkStack (or custom Interceptor) with safe error handling
