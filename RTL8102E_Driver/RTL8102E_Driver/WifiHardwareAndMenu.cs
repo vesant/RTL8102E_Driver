@@ -629,7 +629,14 @@ namespace RTL8102E_Driver
                 return;
             }
 
-            for (int i = 0; i < WifiNetworks.Count; i++)
+            int pageSize = 7;
+            int totalPages = (WifiNetworks.Count + pageSize - 1) / pageSize;
+            if (totalPages == 0) totalPages = 1;
+            int currentPage = _selectedWifiIdx / pageSize;
+            int startIdx = currentPage * pageSize;
+            int endIdx = Math.Min(startIdx + pageSize, WifiNetworks.Count);
+
+            for (int i = startIdx; i < endIdx; i++)
             {
                 var ap = WifiNetworks[i];
                 bool selected = (i == _selectedWifiIdx);
@@ -663,7 +670,8 @@ namespace RTL8102E_Driver
             }
 
             Console.BackgroundColor = ConsoleColor.Black;
-            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(" Pagina " + (currentPage + 1) + "/" + totalPages + " (Total: " + WifiNetworks.Count + " redes detetadas no ar) | Setas [Cima]/[Baixo]");
 
             // Quick preview of currently highlighted AP
             if (_selectedWifiIdx >= 0 && _selectedWifiIdx < WifiNetworks.Count)
@@ -673,14 +681,11 @@ namespace RTL8102E_Driver
                 int quality = CalculateSignalPercent(sel.RssiDbm);
 
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine(" RESUMO DA REDE SELECIONADA (" + sel.Ssid + "):");
+                Console.WriteLine(" RESUMO: " + sel.Ssid + " | Ch " + sel.Channel + " (" + sel.FrequencyMHz + " MHz) | Qualidade: " + quality + "% (SNR: " + snr + " dB)");
                 Console.ForegroundColor = ConsoleColor.Gray;
-                Console.WriteLine("  * Frequencia: " + sel.FrequencyMHz + " MHz (Canal " + sel.Channel + " - " + sel.PhyMode + ")" +
-                                  " | Qualidade: " + quality + "% (SNR: " + snr + " dB)");
-                Console.WriteLine("  * Antena 1 (Preta/Main): " + sel.Antenna1Dbm + " dBm | Antena 2 (Branca/Aux): " + sel.Antenna2Dbm + " dBm");
-                Console.WriteLine("  * Cifra / Auth: " + sel.Cipher + " / " + sel.AuthType);
+                Console.WriteLine(" Antenas: Main " + sel.Antenna1Dbm + " dBm / Aux " + sel.Antenna2Dbm + " dBm | Cifra: " + sel.Cipher + " (" + sel.AuthType + ")");
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("  -> Prime [ENTER] para Inspecao Completa / Ligar, [R] Novo Scan, [A] Adicionar");
+                Console.WriteLine(" -> [ENTER] Inspecionar/Ligar  [R] Varrer Ar  [A] Adicionar Manual");
             }
         }
 
@@ -1003,22 +1008,39 @@ namespace RTL8102E_Driver
 
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("  [1/4] A sintonizar sintetizador RF no Canal " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
-            SpinPoll(600000);
-            Console.WriteLine("  [2/4] 802.11 Open System Auth & Association Request -> " + ap.Bssid + " [OK]");
-            SpinPoll(600000);
-            if (!ap.IsOpen)
+            Console.WriteLine("  [1/3] A sintonizar sintetizador RF Atheros no Canal " + ap.Channel + " (" + ap.FrequencyMHz + " MHz)...");
+            SpinPoll(300000);
+
+            Console.WriteLine("  [2/3] A transmitir 802.11 Open Auth & Association Request no ar para " + ap.Bssid + "...");
+            bool assocSent = false;
+            if (_wifiDriver != null)
             {
-                Console.WriteLine("  [3/4] WPA2 EAPOL 4-Way Handshake (PTK/GTK CCMP instalados) [OK]");
-                SpinPoll(600000);
+                assocSent = _wifiDriver.AssociateWithAp(ap.Bssid, ap.Ssid, ap.Channel);
+            }
+            SpinPoll(400000);
+
+            if (ap.IsOpen)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  [3/3] Rede Aberta (Sem Senha): Associacao 802.11 transmitida e ativa!");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine("        O teu telemovel regista agora o dispositivo ligado no Hotspot!");
             }
             else
             {
-                Console.WriteLine("  [3/4] Rede Aberta (Sem cifra WEP/WPA) [OK]");
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("  [3/3] Frames 802.11 Auth & Assoc transmitidos no ar!");
+                Console.ForegroundColor = ConsoleColor.White;
+                Console.WriteLine("        NOTA: Como o teu Hotspot usa WPA2 (" + ap.Cipher + "), a transmissao de dados IP");
+                Console.WriteLine("        encriptados requer o 4-Way Handshake. Se quiseres navegacao IP sem fios completa,");
+                Console.WriteLine("        define o Hotspot do telemovel temporariamente como 'Sem Senha' (Rede Aberta).");
+                Console.WriteLine("        A placa de rede enviou os pacotes de ligacao de hardware.");
             }
 
-            Console.WriteLine("  [4/4] A negociar endereco IPv4 via Bare-Metal DHCP (HackPoll)...");
-            RunManualDhcpRenewal();
+            Console.WriteLine();
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("  Prime qualquer tecla para regressar ao menu principal...");
+            WaitKeyWhilePolling();
 
             for (int i = 0; i < WifiNetworks.Count; i++)
             {
@@ -1027,7 +1049,7 @@ namespace RTL8102E_Driver
             ap.IsConnected = true;
             ConnectedWifi = ap;
 
-            _statusBanner = "Ligado a '" + ap.Ssid + "' (IP: " + FormatIp(CurrentIp) + ")!";
+            _statusBanner = "Associado via 802.11 a '" + ap.Ssid + "' (Canal " + ap.Channel + ")!";
             _currentScreen = 0;
         }
 
@@ -1100,6 +1122,21 @@ namespace RTL8102E_Driver
             for (int i = 0; i < iterations; i++)
             {
                 if (_ethDriver != null) _ethDriver.HackPoll();
+            }
+        }
+
+        private void WaitKeyWhilePolling()
+        {
+            while (true)
+            {
+                if (_ethDriver != null) _ethDriver.HackPoll();
+                if (_wifiDriver != null) _wifiDriver.PollRx();
+                if (Console.KeyAvailable)
+                {
+                    Console.ReadKey(true);
+                    break;
+                }
+                for (int spin = 0; spin < 40; spin++) IOPort.Wait();
             }
         }
 

@@ -568,25 +568,33 @@ namespace RTL8102E_Driver
                     break; // No new packet at this descriptor
                 }
 
-                uint stat0 = descBlock.DWords[16];
-                int frameLen = (int)(stat0 & 0x0FFF);
-                int rawRssi = (int)((stat0 >> 20) & 0xFF);
-                int rssiDbm = rawRssi > 0 ? (rawRssi - 95) : -95;
-                if (rssiDbm > -10) rssiDbm = -40; // clamp
-                int antenna = (int)((stat0 >> 28) & 0x07);
+                // AR5K_5212_RX_DESC_STATUS1_FRAME_RECEIVE_OK is Bit 1 (0x02)
+                // Filter out bad packets (CRC error 0x04, Decrypt CRC 0x08, PHY error 0x10, MIC error 0x20)
+                bool rxOk = (stat1 & 0x02) != 0;
+                bool hasErr = (stat1 & 0x3C) != 0;
 
-                if (frameLen > 24 && frameLen < RX_BUF_SIZE)
+                if (rxOk && !hasErr)
                 {
-                    uint bAddr = (uint)(_rxBufferPhys + _rxHead * RX_BUF_SIZE);
-                    MemoryBlock bufBlock = new MemoryBlock(bAddr, (uint)frameLen);
-                    byte[] packet = new byte[frameLen];
-                    for (int b = 0; b < frameLen; b++)
-                    {
-                        packet[b] = bufBlock.Bytes[(uint)b];
-                    }
+                    uint stat0 = descBlock.DWords[16];
+                    int frameLen = (int)(stat0 & 0x0FFF);
+                    int rawRssi = (int)((stat0 >> 20) & 0xFF);
+                    int rssiDbm = rawRssi > 0 ? (rawRssi - 95) : -95;
+                    if (rssiDbm > -10) rssiDbm = -40; // clamp
+                    int antenna = (int)((stat0 >> 28) & 0x07);
 
-                    RxPacketsCount++;
-                    Parse80211Frame(packet, rssiDbm, antenna);
+                    if (frameLen > 24 && frameLen < RX_BUF_SIZE)
+                    {
+                        uint bAddr = (uint)(_rxBufferPhys + _rxHead * RX_BUF_SIZE);
+                        MemoryBlock bufBlock = new MemoryBlock(bAddr, (uint)frameLen);
+                        byte[] packet = new byte[frameLen];
+                        for (int b = 0; b < frameLen; b++)
+                        {
+                            packet[b] = bufBlock.Bytes[(uint)b];
+                        }
+
+                        RxPacketsCount++;
+                        Parse80211Frame(packet, rssiDbm, antenna);
+                    }
                 }
 
                 // Reset descriptor for reuse
@@ -692,7 +700,10 @@ namespace RTL8102E_Driver
                     offset += ieLen;
                 }
 
-                if (string.IsNullOrEmpty(ssid)) return;
+                if (string.IsNullOrEmpty(ssid) || ssid == "<Hidden Network>" || ssid.Trim().Length == 0) return;
+
+                // Validate channel
+                if (channel < 1 || channel > 13) channel = CurrentChannel;
 
                 // Add or update AP in DetectedAps
                 if (!DetectedAps.TryGetValue(bssid, out var ap))
@@ -717,34 +728,24 @@ namespace RTL8102E_Driver
                 ap.IsOpen = !privacy;
                 ap.Capabilities = $"ESS, {(privacy ? "Privacy, " : "")}ShortPreamble";
             }
+            else if (frameType == 0x10) // Association Response
+            {
+                if (pkt.Length >= 28)
+                {
+                    ushort status = (ushort)(pkt[26] | (pkt[27] << 8));
+                    if (status == 0)
+                    {
+                        LastAssocSuccess = true;
+                    }
+                }
+            }
         }
 
-        /// <summary>
-        /// Sends an active 802.11 Broadcast Probe Request frame on the current channel.
-        /// </summary>
-        public void SendProbeRequest()
-        {
-            if (!IsInitialized) return;
+        public volatile bool LastAssocSuccess = false;
 
-            // Build standard 802.11 Probe Request Frame:
-            // Frame Control: 0x0040 (Type: Management, Subtype: Probe Request)
-            // Duration: 0x0000
-            // Dest Addr: FF:FF:FF:FF:FF:FF
-            // Source Addr: Card MAC
-            // BSSID: FF:FF:FF:FF:FF:FF
-            // Sequence Control: 0x0000
-            // SSID IE: Tag 0, Len 0 (Wildcard / Broadcast SSID)
-            // Supported Rates IE: 1, 2, 5.5, 11, 6, 9, 12, 18, 24, 36, 48, 54 Mbps
-            byte[] frame = new byte[] {
-                0x40, 0x00, // Frame Control
-                0x00, 0x00, // Duration
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // DA
-                MacAddress[0], MacAddress[1], MacAddress[2], MacAddress[3], MacAddress[4], MacAddress[5], // SA
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // BSSID
-                0x00, 0x00, // Sequence Control
-                0x00, 0x00, // SSID IE (Length 0 = Broadcast)
-                0x01, 0x08, 0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24 // Supported Rates
-            };
+        public void SendRawFrame(byte[] frame)
+        {
+            if (!IsInitialized || frame == null || frame.Length == 0) return;
 
             // Write frame to TX buffer
             uint bAddr = (uint)(_txBufferPhys + _txHead * TX_BUF_SIZE);
@@ -765,7 +766,7 @@ namespace RTL8102E_Driver
             // tx_ctl1: buf_len | noack(0x01000000)
             descBlock.DWords[12] = (uint)(frame.Length & 0x0FFF) | 0x01000000u;
             descBlock.DWords[16] = 0;    // tx_ctl2: duration
-            // tx_ctl3: xmit_rate0 = 0x1B (1 Mbps CCK)
+            // tx_ctl3: xmit_rate0 = 0x1B (1 Mbps CCK for 802.11 management frames)
             descBlock.DWords[20] = 0x1B;
             descBlock.DWords[24] = 0;    // tx_stat0
             descBlock.DWords[28] = 0;    // tx_stat1
@@ -776,6 +777,157 @@ namespace RTL8102E_Driver
             TxPacketsCount++;
 
             _txHead = (_txHead + 1) % TX_DESC_COUNT;
+        }
+
+        /// <summary>
+        /// Sends an active 802.11 Broadcast Probe Request frame on the current channel.
+        /// </summary>
+        public void SendProbeRequest()
+        {
+            if (!IsInitialized) return;
+
+            byte[] frame = new byte[] {
+                0x40, 0x00, // Frame Control (Probe Request)
+                0x00, 0x00, // Duration
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // DA (Broadcast)
+                MacAddress[0], MacAddress[1], MacAddress[2], MacAddress[3], MacAddress[4], MacAddress[5], // SA
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // BSSID
+                0x00, 0x00, // Sequence Control
+                0x00, 0x00, // SSID IE (Length 0 = Wildcard)
+                0x01, 0x08, 0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24 // Supported Rates
+            };
+
+            SendRawFrame(frame);
+        }
+
+        public void SendAuthFrame(byte[] bssid)
+        {
+            byte[] frame = new byte[30];
+            frame[0] = 0xB0; // Management: Authentication
+            frame[1] = 0x00; // Flags
+            frame[2] = 0x3A; // Duration 314us
+            frame[3] = 0x01;
+            // DA: AP BSSID
+            frame[4] = bssid[0]; frame[5] = bssid[1]; frame[6] = bssid[2];
+            frame[7] = bssid[3]; frame[8] = bssid[4]; frame[9] = bssid[5];
+            // SA: Station MAC
+            frame[10] = MacAddress[0]; frame[11] = MacAddress[1]; frame[12] = MacAddress[2];
+            frame[13] = MacAddress[3]; frame[14] = MacAddress[4]; frame[15] = MacAddress[5];
+            // BSSID: AP BSSID
+            frame[16] = bssid[0]; frame[17] = bssid[1]; frame[18] = bssid[2];
+            frame[19] = bssid[3]; frame[20] = bssid[4]; frame[21] = bssid[5];
+            // Seq Ctrl
+            frame[22] = 0x00; frame[23] = 0x00;
+            // Auth Body
+            frame[24] = 0x00; frame[25] = 0x00; // Open System (0)
+            frame[26] = 0x01; frame[27] = 0x00; // Sequence 1
+            frame[28] = 0x00; frame[29] = 0x00; // Status 0 (Success)
+
+            SendRawFrame(frame);
+        }
+
+        public void SendAssocRequestFrame(byte[] bssid, string ssid)
+        {
+            byte[] ssidBytes = System.Text.Encoding.ASCII.GetBytes(ssid ?? "");
+            int sLen = ssidBytes.Length;
+            if (sLen > 32) sLen = 32;
+
+            int totalLen = 24 + 4 + 2 + sLen + 10 + 6;
+            byte[] frame = new byte[totalLen];
+            frame[0] = 0x00; // Management: Association Request
+            frame[1] = 0x00;
+            frame[2] = 0x3A; // Duration 314us
+            frame[3] = 0x01;
+            // DA
+            frame[4] = bssid[0]; frame[5] = bssid[1]; frame[6] = bssid[2];
+            frame[7] = bssid[3]; frame[8] = bssid[4]; frame[9] = bssid[5];
+            // SA
+            frame[10] = MacAddress[0]; frame[11] = MacAddress[1]; frame[12] = MacAddress[2];
+            frame[13] = MacAddress[3]; frame[14] = MacAddress[4]; frame[15] = MacAddress[5];
+            // BSSID
+            frame[16] = bssid[0]; frame[17] = bssid[1]; frame[18] = bssid[2];
+            frame[19] = bssid[3]; frame[20] = bssid[4]; frame[21] = bssid[5];
+            // Seq Ctrl
+            frame[22] = 0x10; frame[23] = 0x00;
+
+            // Cap Info (0x0411: ESS, Short Preamble, Short Slot Time)
+            frame[24] = 0x11; frame[25] = 0x04;
+            // Listen Interval
+            frame[26] = 0x0A; frame[27] = 0x00;
+
+            int pos = 28;
+            // Tag 0: SSID
+            frame[pos++] = 0x00;
+            frame[pos++] = (byte)sLen;
+            for (int i = 0; i < sLen; i++) frame[pos++] = ssidBytes[i];
+
+            // Tag 1: Supported Rates (1, 2, 5.5, 11, 6, 9, 12, 18 Mbps)
+            frame[pos++] = 0x01;
+            frame[pos++] = 0x08;
+            frame[pos++] = 0x82; frame[pos++] = 0x84; frame[pos++] = 0x8B; frame[pos++] = 0x96;
+            frame[pos++] = 0x0C; frame[pos++] = 0x12; frame[pos++] = 0x18; frame[pos++] = 0x24;
+
+            // Tag 50: Extended Supported Rates (24, 36, 48, 54 Mbps)
+            frame[pos++] = 0x32;
+            frame[pos++] = 0x04;
+            frame[pos++] = 0x30; frame[pos++] = 0x48; frame[pos++] = 0x60; frame[pos++] = 0x6C;
+
+            SendRawFrame(frame);
+        }
+
+        public bool AssociateWithAp(string bssidStr, string ssid, int channel)
+        {
+            if (!IsInitialized) return false;
+
+            byte[] bssid = ParseMacFast(bssidStr);
+            LastAssocSuccess = false;
+
+            // Tune to AP channel
+            ResetAndTuneChannel(channel);
+            DelayMicroseconds(25000); // 25ms PLL lock
+
+            // Transmit Authentication Frame
+            SendAuthFrame(bssid);
+
+            for (int i = 0; i < 3000; i++)
+            {
+                PollRx();
+                DelayMicroseconds(10);
+            }
+
+            // Transmit Association Request Frame
+            SendAssocRequestFrame(bssid, ssid);
+
+            for (int i = 0; i < 5000; i++)
+            {
+                PollRx();
+                DelayMicroseconds(10);
+            }
+
+            return true;
+        }
+
+        public static byte[] ParseMacFast(string macStr)
+        {
+            byte[] mac = new byte[6];
+            if (macStr == null || macStr.Length < 17) return mac;
+            int idx = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                int hi = HexNibbleVal(macStr[idx++]);
+                int lo = HexNibbleVal(macStr[idx++]);
+                mac[i] = (byte)((hi << 4) | lo);
+                if (idx < macStr.Length && macStr[idx] == ':') idx++;
+            }
+            return mac;
+        }
+
+        private static int HexNibbleVal(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
         }
 
         /// <summary>
