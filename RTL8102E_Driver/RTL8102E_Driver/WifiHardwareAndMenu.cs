@@ -1052,16 +1052,14 @@ namespace RTL8102E_Driver
             else
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine("  [2/4] Transmitting 802.11 Open Auth & RSN Association Request frames over the air...");
                 if (_wifiDriver != null)
                 {
                     _wifiDriver.StartWpa2Handshake(ap.Bssid, ap.Ssid, ap.Channel, pwd);
                 }
 
-                Console.WriteLine("  [3/4] Initiating IEEE 802.11i WPA2-PSK 4-Way Handshake with Access Point...");
-                Console.WriteLine("        Awaiting EAPOL-Key Message 1, computing PTK/MIC, and replying Message 2...");
+                Console.WriteLine("  [4/4] Awaiting EAPOL-Key 4-Way Handshake with Access Point...");
 
-                int timeoutTicks = 450;
+                int timeoutTicks = 500;
                 while (_wifiDriver != null &&
                        _wifiDriver.Wpa2Engine != null &&
                        _wifiDriver.Wpa2Engine.State != Wpa2HandshakeState.Completed &&

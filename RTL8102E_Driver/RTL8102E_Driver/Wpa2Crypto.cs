@@ -476,6 +476,9 @@ namespace RTL8102E_Driver
                 // Construct Message 2
                 responseFrame = BuildMessage2();
                 State = Wpa2HandshakeState.Msg2Sent;
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  [EAPOL] Message 1/4 received from AP! Sent Message 2/4 (with computed MIC).");
+                Console.ForegroundColor = ConsoleColor.Cyan;
                 return true;
             }
 
@@ -509,12 +512,18 @@ namespace RTL8102E_Driver
                 {
                     State = Wpa2HandshakeState.Failed;
                     FailureReason = "AP Message 3 MIC verification failed! Incorrect passphrase.";
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine("  [EAPOL] Message 3/4 MIC mismatch! Password incorrect.");
+                    Console.ForegroundColor = ConsoleColor.Cyan;
                     return false;
                 }
 
                 // AP Message 3 verified! Build Message 4
                 responseFrame = BuildMessage4();
                 State = Wpa2HandshakeState.Completed;
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("  [EAPOL] Message 3/4 verified! AP acknowledged station. Sent Message 4/4.");
+                Console.ForegroundColor = ConsoleColor.Cyan;
                 return true;
             }
 
