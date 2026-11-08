@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("Use VMware Player or Workstation to deploy and debug.")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+39d322ae7419b9aa047da96e2a6ce5435ba61e94")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+eddd0e0b478cc056eb5372a322fbcf5f995c6f22")]
 [assembly: System.Reflection.AssemblyProductAttribute("RTL8102E_Driver")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RTL8102E_Driver")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

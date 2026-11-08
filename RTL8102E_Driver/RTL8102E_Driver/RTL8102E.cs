@@ -2,8 +2,32 @@ using System;
 using Cosmos.Core;
 using Cosmos.HAL;
 
+namespace Cosmos.HAL
+{
+    [AttributeUsage(AttributeTargets.Class)]
+    public class DriverAttribute : Attribute
+    {
+        public DriverAttribute(DriverType type, string description) { }
+    }
+
+    [AttributeUsage(AttributeTargets.Class)]
+    public class AuthorAttribute : Attribute
+    {
+        public AuthorAttribute(string author) { }
+    }
+
+    public enum DriverType
+    {
+        Network,
+        Storage,
+        Audio
+    }
+}
+
 namespace RTL8102E_Driver
 {
+    [Cosmos.HAL.Driver(Cosmos.HAL.DriverType.Network, "Realtek RTL8102E/RTL8136 PCI Ethernet")]
+    [Cosmos.HAL.Author("ghost")]
     public class RTL8102E : NetworkDevice
     {
         private PCIDeviceNormal pciDevice;

@@ -63,6 +63,7 @@ namespace RTL8102E_Driver
     public class NetworkMenuManager
     {
         private RTL8102E _ethDriver;
+        private AtherosAR2425Driver _wifiDriver;
         private CustomDHCP _dhcp;
 
         public List<PciDeviceInfo> PciDevices = new List<PciDeviceInfo>();
@@ -91,15 +92,16 @@ namespace RTL8102E_Driver
         private int _selectedPciIdx = 0;
         private bool _needsRedraw = true;
         private uint _pollTick = 0;
-        private string _statusBanner = "Use Setas [Cima/Baixo], [Enter] Detalhes/Ligar, [1-5] Ecrãs, [R] Scan";
+        private string _statusBanner = "Use Setas [Cima/Baixo], [Enter] Detalhes/Ligar, [1-5] Ecras, [R] Scan";
 
         // Sniffer Ring Buffer
         private string[] _sniffLogs = new string[12];
         private int _sniffCount = 0;
 
-        public NetworkMenuManager(RTL8102E ethDriver, CustomDHCP dhcp, byte[] initialIp, byte[] initialMask, byte[] initialGw, byte[] initialDns)
+        public NetworkMenuManager(RTL8102E ethDriver, AtherosAR2425Driver wifiDriver, CustomDHCP dhcp, byte[] initialIp, byte[] initialMask, byte[] initialGw, byte[] initialDns)
         {
             _ethDriver = ethDriver;
+            _wifiDriver = wifiDriver;
             _dhcp = dhcp;
             CurrentIp = initialIp;
             if (initialMask != null) CurrentMask = initialMask;
@@ -263,7 +265,11 @@ namespace RTL8102E_Driver
                 }
             }
 
-            if (DetectedWifiPci != null)
+            if (_wifiDriver != null && _wifiDriver.IsInitialized)
+            {
+                DetectedWifiSummary = _wifiDriver.HardwareSummary;
+            }
+            else if (DetectedWifiPci != null)
             {
                 DetectedWifiSummary = DetectedWifiPci.Description + " [PCI " +
                                       DetectedWifiPci.Bus + ":" + DetectedWifiPci.Slot + ":" + DetectedWifiPci.Function +
@@ -362,102 +368,47 @@ namespace RTL8102E_Driver
         private void PopulateInitialWifiNetworks()
         {
             WifiNetworks.Clear();
+            ConnectedWifi = null;
+            SyncDetectedNetworks();
+        }
 
-            var ap1 = new WifiAccessPoint();
-            ap1.Ssid = "Windows-ICS-Bridge (Gateway)";
-            ap1.Bssid = "00:1E:33:8F:C1:01";
-            ap1.Channel = 6;
-            ap1.FrequencyMHz = 2437;
-            ap1.RssiDbm = -41;
-            ap1.NoiseDbm = -95;
-            ap1.Antenna1Dbm = -41;
-            ap1.Antenna2Dbm = -44;
-            ap1.Security = "WPA2-PSK";
-            ap1.Cipher = "CCMP (AES-128)";
-            ap1.AuthType = "PSK (Pre-Shared Key)";
-            ap1.PhyMode = "802.11g/n";
-            ap1.MaxRateMbps = 150;
-            ap1.IsOpen = false;
-            ap1.IsConnected = (CurrentIp != null);
-            ap1.Capabilities = "ESS, Privacy, ShortPreamble, ShortSlot, WMM";
-            WifiNetworks.Add(ap1);
-            if (ap1.IsConnected) ConnectedWifi = ap1;
+        private void SyncDetectedNetworks()
+        {
+            if (_wifiDriver == null) return;
 
-            var ap2 = new WifiAccessPoint();
-            ap2.Ssid = "deloitte.intranet.ips.pt";
-            ap2.Bssid = "34:6F:90:A2:11:C0";
-            ap2.Channel = 1;
-            ap2.FrequencyMHz = 2412;
-            ap2.RssiDbm = -56;
-            ap2.NoiseDbm = -94;
-            ap2.Antenna1Dbm = -56;
-            ap2.Antenna2Dbm = -59;
-            ap2.Security = "WPA2-EAP";
-            ap2.Cipher = "CCMP (AES-128)";
-            ap2.AuthType = "802.1X / PEAP-MSCHAPv2";
-            ap2.PhyMode = "802.11g/n";
-            ap2.MaxRateMbps = 144;
-            ap2.IsOpen = false;
-            ap2.IsConnected = false;
-            ap2.Capabilities = "ESS, Privacy, RSN, 802.1X, ShortSlot, QoS";
-            WifiNetworks.Add(ap2);
+            bool changed = false;
+            foreach (var kvp in _wifiDriver.DetectedAps)
+            {
+                var ap = kvp.Value;
+                bool found = false;
+                for (int i = 0; i < WifiNetworks.Count; i++)
+                {
+                    if (WifiNetworks[i].Bssid == ap.Bssid)
+                    {
+                        found = true;
+                        WifiNetworks[i].Ssid = ap.Ssid;
+                        WifiNetworks[i].RssiDbm = ap.RssiDbm;
+                        WifiNetworks[i].Antenna1Dbm = ap.Antenna1Dbm;
+                        WifiNetworks[i].Antenna2Dbm = ap.Antenna2Dbm;
+                        WifiNetworks[i].Channel = ap.Channel;
+                        WifiNetworks[i].Security = ap.Security;
+                        WifiNetworks[i].Cipher = ap.Cipher;
+                        break;
+                    }
+                }
 
-            var ap3 = new WifiAccessPoint();
-            ap3.Ssid = "eduroam";
-            ap3.Bssid = "34:6F:90:A2:11:C1";
-            ap3.Channel = 11;
-            ap3.FrequencyMHz = 2462;
-            ap3.RssiDbm = -62;
-            ap3.NoiseDbm = -95;
-            ap3.Antenna1Dbm = -63;
-            ap3.Antenna2Dbm = -62;
-            ap3.Security = "WPA2-EAP";
-            ap3.Cipher = "CCMP (AES-128)";
-            ap3.AuthType = "802.1X Enterprise";
-            ap3.PhyMode = "802.11g/n";
-            ap3.MaxRateMbps = 130;
-            ap3.IsOpen = false;
-            ap3.IsConnected = false;
-            ap3.Capabilities = "ESS, Privacy, RSN, PMF, FastTransition";
-            WifiNetworks.Add(ap3);
+                if (!found)
+                {
+                    WifiNetworks.Add(ap);
+                    changed = true;
+                }
+            }
 
-            var ap4 = new WifiAccessPoint();
-            ap4.Ssid = "IPS-Guest-Open";
-            ap4.Bssid = "34:6F:90:A2:11:C2";
-            ap4.Channel = 1;
-            ap4.FrequencyMHz = 2412;
-            ap4.RssiDbm = -68;
-            ap4.NoiseDbm = -95;
-            ap4.Antenna1Dbm = -68;
-            ap4.Antenna2Dbm = -71;
-            ap4.Security = "OPEN";
-            ap4.Cipher = "None (Clear)";
-            ap4.AuthType = "Open System";
-            ap4.PhyMode = "802.11b/g";
-            ap4.MaxRateMbps = 54;
-            ap4.IsOpen = true;
-            ap4.IsConnected = false;
-            ap4.Capabilities = "ESS, ShortPreamble, CaptivePortal";
-            WifiNetworks.Add(ap4);
-
-            var ap5 = new WifiAccessPoint();
-            ap5.Ssid = "Hotspot-Ghost-Lab";
-            ap5.Bssid = "AC:84:C6:4E:09:B2";
-            ap5.Channel = 9;
-            ap5.FrequencyMHz = 2452;
-            ap5.RssiDbm = -51;
-            ap5.NoiseDbm = -96;
-            ap5.Antenna1Dbm = -51;
-            ap5.Antenna2Dbm = -53;
-            ap5.Security = "WPA2-PSK";
-            ap5.Cipher = "CCMP (AES-128)";
-            ap5.AuthType = "PSK (Pre-Shared Key)";
-            ap5.PhyMode = "802.11b/g/n";
-            ap5.MaxRateMbps = 150;
-            ap5.IsOpen = false;
-            ap5.IsConnected = false;
-            ap5.Capabilities = "ESS, Privacy, ShortPreamble, ShortSlot";
-            WifiNetworks.Add(ap5);
+            if (changed)
+            {
+                if (_selectedWifiIdx >= WifiNetworks.Count) _selectedWifiIdx = 0;
+                _needsRedraw = true;
+            }
         }
 
         public void UpdateStep()
@@ -466,6 +417,12 @@ namespace RTL8102E_Driver
             {
                 _ethDriver.HackPoll();
                 Sys.Network.NetworkStack.Update();
+            }
+
+            if (_wifiDriver != null)
+            {
+                _wifiDriver.PollRx();
+                SyncDetectedNetworks();
             }
 
             _pollTick++;
@@ -505,7 +462,14 @@ namespace RTL8102E_Driver
                 }
                 else if (key.Key == ConsoleKey.Enter || key.KeyChar == 'd' || key.KeyChar == 'D')
                 {
-                    _currentScreen = 1; // Open AP Details & Connect Screen
+                    if (WifiNetworks.Count > 0 && _selectedWifiIdx >= 0 && _selectedWifiIdx < WifiNetworks.Count)
+                    {
+                        _currentScreen = 1; // Open AP Details & Connect Screen
+                    }
+                    else
+                    {
+                        _statusBanner = "Nenhuma rede selecionada. Prime [R] para procurar redes no ar.";
+                    }
                 }
                 else if (key.KeyChar == 'r' || key.KeyChar == 'R')
                 {
@@ -524,7 +488,10 @@ namespace RTL8102E_Driver
                 }
                 else if (key.Key == ConsoleKey.Enter || key.KeyChar == 'c' || key.KeyChar == 'C')
                 {
-                    ConnectToSelectedWifi(WifiNetworks[_selectedWifiIdx]);
+                    if (WifiNetworks.Count > 0 && _selectedWifiIdx >= 0 && _selectedWifiIdx < WifiNetworks.Count)
+                    {
+                        ConnectToSelectedWifi(WifiNetworks[_selectedWifiIdx]);
+                    }
                 }
             }
             else if (_currentScreen == 2)
@@ -576,7 +543,13 @@ namespace RTL8102E_Driver
             DrawTopHeader();
 
             if (_currentScreen == 0) DrawWifiListScreen();
-            else if (_currentScreen == 1) DrawWifiDetailScreen(WifiNetworks[_selectedWifiIdx]);
+            else if (_currentScreen == 1)
+            {
+                if (WifiNetworks.Count > 0 && _selectedWifiIdx >= 0 && _selectedWifiIdx < WifiNetworks.Count)
+                    DrawWifiDetailScreen(WifiNetworks[_selectedWifiIdx]);
+                else
+                    _currentScreen = 0;
+            }
             else if (_currentScreen == 2) DrawFullHardwareAndNetworkDetails();
             else if (_currentScreen == 3) DrawPciAndUsbScannerScreen();
             else if (_currentScreen == 4) DrawPciDeviceHexInspector(PciDevices[_selectedPciIdx]);
@@ -639,6 +612,22 @@ namespace RTL8102E_Driver
             Console.WriteLine(" ID  SINAL         CANAL   SEGURANCA   TAXA     BSSID              SSID");
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine(" --- ------------- ------- ----------- -------- ------------------ ------------");
+
+            if (WifiNetworks.Count == 0)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine();
+                Console.WriteLine("  [!] Nenhuma rede Wi-Fi detetada no ar ainda.");
+                Console.WriteLine("      O sintetizador RF Atheros AR2425 esta ativo no canal " + (_wifiDriver != null ? _wifiDriver.CurrentChannel : 1) + " a escutar.");
+                Console.WriteLine("      -> Prime [R] para enviar active Probe Requests e varrer os canais 1 a 13!");
+                Console.WriteLine("      -> Prime [A] para adicionar uma rede oculta (Hidden SSID) manualmente.");
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.WriteLine("  Estatisticas: Frames RX=" + (_wifiDriver != null ? _wifiDriver.RxPacketsCount : 0) +
+                                  " | Beacons=" + (_wifiDriver != null ? _wifiDriver.BeaconFramesCount : 0) +
+                                  " | Frames TX=" + (_wifiDriver != null ? _wifiDriver.TxPacketsCount : 0));
+                return;
+            }
 
             for (int i = 0; i < WifiNetworks.Count; i++)
             {
@@ -729,19 +718,34 @@ namespace RTL8102E_Driver
             Console.WriteLine(" === INFORMACAO DETALHADA DE TUDO (PLACA DE REDE, WI-FI, DMA & IP STACK) ===");
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine(" [1. CAMADA WI-FI 802.11 & MODULO MINI-PCIe DUAL-ANTENNA]");
+            Console.WriteLine(" [1. CAMADA WI-FI 802.11 & MODULO MINI-PCIe DUAL-ANTENNA (ATHEROS AR2425)]");
             Console.ForegroundColor = ConsoleColor.Gray;
-            Console.WriteLine("  * Hardware Detetado : " + DetectedWifiSummary);
-            Console.WriteLine("  * Antenas Fisicas   : 2x Conectores U.FL/IPEX (Antena 1 Preta + Antena 2 Branca)");
-            if (ConnectedWifi != null)
+            if (_wifiDriver != null && _wifiDriver.IsInitialized)
             {
-                Console.WriteLine("  * Estado Associacao : Associado a '" + ConnectedWifi.Ssid + "' [" + ConnectedWifi.Bssid + "]");
-                Console.WriteLine("  * Radio / RF        : Canal " + ConnectedWifi.Channel + " (" + ConnectedWifi.FrequencyMHz +
-                                  " MHz) | Sinal: " + ConnectedWifi.RssiDbm + " dBm | " + ConnectedWifi.Security);
+                Console.WriteLine("  * Chip & Localizacao: " + _wifiDriver.HardwareSummary);
+                Console.WriteLine("  * Endereco MAC Real : " + _wifiDriver.GetMacString() + " (Lido da EEPROM fisica)");
+                Console.WriteLine("  * MMIO Base / SREV  : 0x" + Hex32(_wifiDriver.MmioBase) +
+                                  " | SREV=0x" + Hex32(_wifiDriver.MacSrev) +
+                                  " | PHY ID=0x" + Hex32(_wifiDriver.PhyChipId));
+                Console.WriteLine("  * EEPROM / RegDomain: Versao 0x" + Hex16(_wifiDriver.EepromVersion) +
+                                  " | RegDomain 0x" + Hex16(_wifiDriver.EepromRegDomain));
+                Console.WriteLine("  * Telemetria Radio  : Canal " + _wifiDriver.CurrentChannel + " (" + (2407 + 5 * _wifiDriver.CurrentChannel) +
+                                  " MHz) | Antena 1(Main/Preto) + Antena 2(Aux/Branco) OK");
+                Console.WriteLine("  * Contadores 802.11 : Frames RX=" + _wifiDriver.RxPacketsCount +
+                                  " (Beacons: " + _wifiDriver.BeaconFramesCount + ") | Frames TX=" + _wifiDriver.TxPacketsCount);
+                if (ConnectedWifi != null)
+                {
+                    Console.WriteLine("  * Estado Associacao : Associado a '" + ConnectedWifi.Ssid + "' [" + ConnectedWifi.Bssid + "] (" + ConnectedWifi.RssiDbm + " dBm)");
+                }
+                else
+                {
+                    Console.WriteLine("  * Estado Associacao : A escutar no ar (Seleciona uma rede no menu [1] e prime Enter)");
+                }
             }
             else
             {
-                Console.WriteLine("  * Estado Associacao : Nao associado (Escolhe uma rede no menu [1])");
+                Console.WriteLine("  * Hardware Detetado : " + DetectedWifiSummary);
+                Console.WriteLine("  * Estado Driver     : Nao inicializado ou chip ausente");
             }
 
             Console.ForegroundColor = ConsoleColor.Cyan;
@@ -922,48 +926,57 @@ namespace RTL8102E_Driver
             Console.Clear();
             DrawTopHeader();
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(" [SCANNER 802.11] A varrer canais de radio 2.4 GHz (Canais 1 a 13)...");
-            Console.WriteLine(" [ANTENAS] A medir RSSI na Antena 1 (Cabo Preto) e Antena 2 (Cabo Branco)...");
+            Console.WriteLine(" [SCANNER 802.11 REAL] A varrer canais de radio 2.4 GHz (Canais 1 a 13)...");
+            Console.WriteLine(" [PROBE REQUESTS] A emitir frames 802.11 active probe request broadcast no ar...");
             Console.WriteLine();
 
-            int[] freqs = new int[] { 2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462, 2467, 2472 };
-            for (int ch = 1; ch <= 13; ch++)
+            if (_wifiDriver != null && _wifiDriver.IsInitialized)
             {
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.Write("  -> Canal " + PadRight(ch.ToString(), 2) + " (" + freqs[ch - 1] + " MHz): ");
-                // Keep polling hardware during scan
-                for (int spin = 0; spin < 350000; spin++)
+                int[] freqs = new int[] { 2412, 2417, 2422, 2427, 2432, 2437, 2442, 2447, 2452, 2457, 2462, 2467, 2472 };
+                for (int ch = 1; ch <= 13; ch++)
                 {
-                    if (_ethDriver != null) _ethDriver.HackPoll();
-                }
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.Write("  -> Canal " + PadRight(ch.ToString(), 2) + " (" + freqs[ch - 1] + " MHz): ");
 
-                bool foundOnCh = false;
-                for (int i = 0; i < WifiNetworks.Count; i++)
-                {
-                    if (WifiNetworks[i].Channel == ch)
+                    _wifiDriver.ResetAndTuneChannel(ch);
+                    _wifiDriver.SendProbeRequest();
+
+                    for (int d = 0; d < 3500; d++)
                     {
-                        // Slight realistic RSSI fluctuation (+/- 1 dBm)
-                        int delta = (int)((_pollTick + (uint)i) % 3) - 1;
-                        WifiNetworks[i].RssiDbm += delta;
-                        if (WifiNetworks[i].RssiDbm > -30) WifiNetworks[i].RssiDbm = -35;
-                        if (WifiNetworks[i].RssiDbm < -88) WifiNetworks[i].RssiDbm = -85;
-                        WifiNetworks[i].Antenna1Dbm = WifiNetworks[i].RssiDbm;
-                        WifiNetworks[i].Antenna2Dbm = WifiNetworks[i].RssiDbm - 2;
-
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.Write("[Beacon: " + WifiNetworks[i].Ssid + " " + WifiNetworks[i].RssiDbm + "dBm] ");
-                        foundOnCh = true;
+                        _wifiDriver.PollRx();
+                        if (_ethDriver != null) _ethDriver.HackPoll();
+                        for (int spin = 0; spin < 40; spin++) IOPort.Wait();
                     }
-                }
-                if (!foundOnCh)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.Write("limpo (ruido -95 dBm)");
-                }
-                Console.WriteLine();
-            }
 
-            _statusBanner = "Scan 802.11 completo! " + WifiNetworks.Count + " redes detetadas pelas 2 antenas.";
+                    int countOnCh = 0;
+                    foreach (var kvp in _wifiDriver.DetectedAps)
+                    {
+                        if (kvp.Value.Channel == ch)
+                        {
+                            countOnCh++;
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.Write("[" + kvp.Value.Ssid + " " + kvp.Value.RssiDbm + "dBm] ");
+                        }
+                    }
+
+                    if (countOnCh == 0)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkGray;
+                        Console.Write("limpo (-95 dBm)");
+                    }
+                    Console.WriteLine();
+                }
+
+                _wifiDriver.ResetAndTuneChannel(1);
+                SyncDetectedNetworks();
+                _statusBanner = "Varrimento 802.11 concluido! " + WifiNetworks.Count + " rede(s) real(is) detetada(s) no ar.";
+            }
+            else
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("  [AVISO] Chip Atheros AR2425 nao detetado ou nao inicializado.");
+                _statusBanner = "Erro: Driver Atheros nao disponivel para scan.";
+            }
         }
 
         private void ConnectToSelectedWifi(WifiAccessPoint ap)

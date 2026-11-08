@@ -6,6 +6,7 @@ using Sys = Cosmos.System;
 namespace RTL8102E_Driver {
     public class Kernel : Sys.Kernel {
         private RTL8102E driver;
+        private AtherosAR2425Driver wifiDriver;
         private CustomDHCP dhcp;
         private NetworkMenuManager menu;
 
@@ -53,8 +54,22 @@ namespace RTL8102E_Driver {
                 Console.WriteLine("r8102e: probe failed.");
             }
 
+            Console.WriteLine("loading Atheros AR2425 802.11b/g bare-metal wireless driver...");
+            wifiDriver = new AtherosAR2425Driver();
+            bool wifiResult = wifiDriver.FindAndInitialize();
+            if (wifiResult)
+            {
+                Console.WriteLine("ath5k: Atheros AR2425 wireless radio initialized and tuned!");
+                Console.WriteLine("ath5k: performing initial 802.11 channel scan (Ch 1..13)...");
+                wifiDriver.ScanAllChannels();
+            }
+            else
+            {
+                Console.WriteLine("ath5k: Atheros AR2425 not detected on PCI bus.");
+            }
+
             Console.WriteLine("A carregar Menu Interativo Wi-Fi & Hardware Inspector...");
-            menu = new NetworkMenuManager(driver, dhcp, assignedIp, mask, gw, dns);
+            menu = new NetworkMenuManager(driver, wifiDriver, dhcp, assignedIp, mask, gw, dns);
         }
 
         protected override void Run() {
